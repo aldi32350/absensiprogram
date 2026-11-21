@@ -1,0 +1,160 @@
+<!-- profil.html — profil yayasan (logo, nama, kontak) + teks kartu; dipakai otomatis oleh kartu, login, sidebar -->
+<section id="view-profil" hidden>
+  <div class="grid-3-1">
+    <form class="card panel" id="pfForm" novalidate>
+      <div class="panel-head"><h2>Identitas yayasan</h2><span class="dim">Dipakai di kartu, halaman login, dan laporan</span></div>
+
+      <div class="pf-logo-row">
+        <div class="pf-logo" id="pfLogoBox"></div>
+        <div class="stack" style="flex:1;min-width:0">
+          <div class="row">
+            <label class="btn sm" style="cursor:pointer"><i data-lucide="image-up"></i> Unggah logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" id="pfLogoFile" hidden></label>
+            <button type="button" class="btn sm ghost" id="pfLogoDel">Hapus logo</button>
+          </div>
+          <p class="dim" style="margin:0">PNG latar transparan paling bagus. Gambar otomatis diperkecil (maks. 360 px).</p>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <label class="field full"><span>Nama yayasan *</span><input class="input" name="nama_yayasan" maxlength="120" placeholder="mis. Yayasan Masjid Muslim Billionaire" required></label>
+        <label class="field"><span>Singkatan / label logo</span><input class="input" name="singkatan" maxlength="20" placeholder="mis. BBHQ"></label>
+        <label class="field"><span>Nama masjid / lembaga</span><input class="input" name="nama_program" maxlength="80" placeholder="mis. Masjid Muslim Billionaire"></label>
+        <label class="field full"><span>Alamat</span><input class="input" name="alamat" maxlength="300"></label>
+        <label class="field"><span>Telepon / WhatsApp</span><input class="input" name="telepon" inputmode="tel" maxlength="40"></label>
+        <label class="field"><span>Email</span><input class="input" name="email" type="email" maxlength="80"></label>
+        <label class="field"><span>Website</span><input class="input" name="website" maxlength="120" placeholder="mis. sosmedmmb.web.id"></label>
+        <label class="field"><span>Instagram</span><input class="input" name="instagram" maxlength="60" placeholder="mis. MasjidMuslimBillionaire"></label>
+        <label class="field full"><span>Ikon tab browser (opsional)</span><input class="input" name="favicon_url" maxlength="300" placeholder="Kosongkan = otomatis memakai logo di atas">
+          <small class="dim" style="margin-top:4px">Biarkan kosong: logo yayasan otomatis jadi ikon di tab browser. Isi URL https://…png hanya bila ingin ikon lain.</small></label>
+
+        <div class="full sec-title">Teks kartu jamaah</div>
+        <label class="field"><span>Judul baris 1 (hijau)</span><input class="input" name="kartu_judul1" maxlength="24"></label>
+        <label class="field"><span>Judul baris 2 (emas)</span><input class="input" name="kartu_judul2" maxlength="24"></label>
+        <label class="field full"><span>Tagline (di bawah kode)</span><input class="input" name="kartu_tagline" maxlength="140"></label>
+        <label class="field"><span>Jenis kode</span><select class="input" name="kartu_kode"><option value="qr">QR code (disarankan)</option><option value="barcode">Barcode CODE128</option></select></label>
+        <label class="field"><span>Nama jamaah di kartu</span><select class="input" name="kartu_nama"><option value="tidak">Tidak ditampilkan</option><option value="ya">Tampilkan</option></select></label>
+      </div>
+      <div class="error-text" id="pfErr"></div>
+    </form>
+
+    <div class="card panel" style="align-self:start;position:sticky;top:84px">
+      <div class="panel-head"><h2>Pratinjau kartu</h2><span class="dim">ukuran asli 54 × 85,6 mm</span></div>
+      <div class="pf-preview" id="pfPreview"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  var $ = App.$;
+  var state = { profil: null, logo: '', dirty: false };
+  var form = $('#pfForm');
+  var FIELDS = ['nama_yayasan', 'singkatan', 'nama_program', 'alamat', 'telepon', 'email', 'website', 'instagram',
+                'kartu_judul1', 'kartu_judul2', 'kartu_tagline', 'kartu_kode', 'kartu_nama', 'favicon_url'];
+
+  function current() {
+    var v = App.formValues(form), p = {};
+    FIELDS.forEach(function (k) { p[k] = v[k]; });
+    p.instagram = (p.instagram || '').replace(/^@+/, '');
+    p.logo = state.logo;
+    return p;
+  }
+
+  function renderLogo() {
+    $('#pfLogoBox').innerHTML = state.logo ? '<img src="' + App.esc(state.logo) + '" alt="Logo">' : Kartu.DEFAULT_LOGO;
+    $('#pfLogoDel').hidden = !state.logo;
+  }
+
+  var pt;
+  function renderPreview() {
+    clearTimeout(pt);
+    pt = setTimeout(function () {
+      var p = current();
+      Kartu.ensureLibs(p).then(function () {
+        $('#pfPreview').innerHTML = Kartu.html({ id_jamaah: 'MIM-0180', nama: 'Contoh Nama Jamaah' }, p);
+      }).catch(function (e) { $('#pfPreview').innerHTML = '<p class="error-text">' + App.esc(e.message) + '</p>'; });
+    }, 120);
+  }
+
+  function load() {
+    return App.api('getProfil').then(function (p) {
+      state.profil = p; state.logo = p.logo || ''; state.dirty = false;
+      FIELDS.forEach(function (k) { if (form[k]) form[k].value = p[k] || ''; });
+      renderLogo(); renderPreview();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  /**
+   * Siapkan logo agar muat disimpan (maks ±300 KB) TANPA mengubah formatnya:
+   * - PNG kecil (≤ 280 KB) disimpan apa adanya → transparansi & kualitas asli tetap.
+   * - PNG besar diperkecil bertahap (512 → 384 → 256 px) tetap PNG (transparan), tidak jadi JPG.
+   * - JPG/WebP diperkecil dengan format yang sama.
+   */
+  var LOGO_LIMIT = 280000;
+  function resizeImage(file) {
+    return new Promise(function (resolve, reject) {
+      if (file.size > 8 * 1024 * 1024) return reject(new Error('File terlalu besar (maks. 8 MB).'));
+      var type = /^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type) ? file.type : 'image/png';
+      var rd = new FileReader();
+      rd.onerror = function () { reject(new Error('Gagal membaca file.')); };
+      rd.onload = function () {
+        var original = String(rd.result);
+        if ((type === 'image/png' || type === 'image/svg+xml') && original.length <= LOGO_LIMIT) return resolve(original);
+        var img = new Image();
+        img.onerror = function () { reject(new Error('File bukan gambar yang valid.')); };
+        img.onload = function () {
+          var outType = type === 'image/svg+xml' ? 'image/png' : type;
+          var sizes = [512, 384, 256, 192], out = '';
+          for (var i = 0; i < sizes.length; i++) {
+            var w = img.naturalWidth || sizes[i], h = img.naturalHeight || sizes[i];
+            var sc = Math.min(1, sizes[i] / Math.max(w, h));
+            var c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(w * sc)); c.height = Math.max(1, Math.round(h * sc));
+            c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);   // kanvas transparan → PNG tetap transparan
+            out = outType === 'image/png' ? c.toDataURL('image/png') : c.toDataURL(outType, 0.9);
+            if (out.length <= LOGO_LIMIT) break;
+          }
+          if (out.length > LOGO_LIMIT) return reject(new Error('Logo terlalu besar walau sudah diperkecil. Gunakan file yang lebih sederhana.'));
+          resolve(out);
+        };
+        img.src = original;
+      };
+      rd.readAsDataURL(file);
+    });
+  }
+
+  $('#pfLogoFile').addEventListener('change', function () {
+    var f = this.files[0]; this.value = '';
+    if (!f) return;
+    resizeImage(f).then(function (data) { state.logo = data; state.dirty = true; renderLogo(); renderPreview(); })
+      .catch(function (e) { App.toast(e.message, 'err'); });
+  });
+  $('#pfLogoDel').addEventListener('click', function () { state.logo = ''; state.dirty = true; renderLogo(); renderPreview(); });
+  form.addEventListener('input', function () { state.dirty = true; renderPreview(); });
+  form.addEventListener('change', function () { state.dirty = true; renderPreview(); });
+  form.addEventListener('submit', function (e) { e.preventDefault(); save(); });
+
+  function save(btn) {
+    $('#pfErr').textContent = '';
+    var p = current();
+    if (!p.nama_yayasan) { $('#pfErr').textContent = 'Nama yayasan wajib diisi.'; form.nama_yayasan.focus(); return; }
+    var send = Object.assign({}, p);
+    if (state.profil && state.logo === (state.profil.logo || '')) delete send.logo;   // logo tidak berubah → tidak dikirim ulang
+    App.confirm('Simpan profil yayasan?', 'Logo, nama, dan teks kartu akan langsung dipakai di kartu, halaman login, dan sidebar.').then(function (yes) {
+      if (!yes) { App.toast('Dibatalkan — profil belum disimpan.', 'warn', 2500); return; }
+      App.busy(btn, App.api('simpanProfil', send)).then(function (saved) {
+        state.profil = saved; state.dirty = false;
+        App.toast('Profil yayasan disimpan', 'ok');
+        if (App.applyBrand) App.applyBrand(saved);
+      }).catch(function (e2) { $('#pfErr').textContent = e2.message; });
+    });
+  }
+
+  Admin.register('profil', {
+    title: 'Profil Yayasan', nav: 'Profil Yayasan', icon: 'building-2',
+    subtitle: 'Logo, nama, kontak, dan teks kartu — dipakai otomatis di seluruh aplikasi',
+    actions: [{ label: 'Simpan Profil', icon: 'save', cls: 'primary', onClick: function (b) { save(b); } }],
+    show: load
+  });
+})();
+</script>

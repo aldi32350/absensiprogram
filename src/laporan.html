@@ -1,0 +1,271 @@
+<!-- laporan.html — laporan perkembangan jamaah oleh fasilitator.
+     View 'lapor'   : khusus akun FASILITATOR (kartu jamaah binaan + form laporan, ramah HP).
+     View 'laporan' : khusus ADMIN (rekap laporan semua fasilitator + posisi indikator jamaah). -->
+<section id="view-lapor" hidden>
+  <div class="lp-hello glass card" id="lpHello"></div>
+  <div class="toolbar lp-toolbar">
+    <div class="input-wrap search">
+      <i data-lucide="search"></i>
+      <input class="input" id="lpSearch" type="search" placeholder="Cari nama jamaah / No Jamaah…" autocomplete="off">
+    </div>
+    <select class="input" id="lpKeputusan" title="Filter Tetap / Lanjut">
+      <option value="">Tetap &amp; Lanjut</option>
+      <option value="Tetap">Tetap</option>
+      <option value="Lanjut">Lanjut</option>
+      <option value="__belum">Belum dilaporkan</option>
+      <option value="__hariini">Belum dilaporkan hari ini</option>
+    </select>
+    <select class="input" id="lpIndikator" title="Filter indikator"><option value="">Semua indikator</option></select>
+  </div>
+  <div class="lp-cards" id="lpCards"><div class="glass card empty">Memuat…</div></div>
+</section>
+
+<section id="view-laporan" hidden>
+  <div class="toolbar">
+    <select class="input" id="lrFasil"><option value="">Semua fasilitator</option></select>
+    <label class="input-wrap" title="Dari tanggal"><input class="input" type="date" id="lrDari"></label>
+    <label class="input-wrap" title="Sampai tanggal"><input class="input" type="date" id="lrSampai"></label>
+    <select class="input" id="lrKeputusan"><option value="">Tetap &amp; Lanjut</option><option>Tetap</option><option>Lanjut</option></select>
+    <select class="input" id="lrIndikator"><option value="">Semua indikator</option></select>
+    <div class="input-wrap search"><i data-lucide="search"></i><input class="input" id="lrSearch" type="search" placeholder="Cari jamaah…" autocomplete="off"></div>
+  </div>
+
+  <div class="stats lr-stats" id="lrStats"></div>
+
+  <div class="grid-3-1 lr-grid">
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Tanggal</th><th>Jamaah</th><th>Indikator</th><th>Keputusan</th><th class="hide-sm-col">Fasilitator</th><th class="hide-sm-col">Keterangan</th></tr></thead>
+        <tbody id="lrBody"><tr><td colspan="6" class="empty">Memuat…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card lr-pos">
+      <div class="sec-title">Posisi jamaah saat ini</div>
+      <p class="dim" style="margin:2px 0 10px">Indikator terakhir setiap jamaah binaan aktif (belum dilaporkan = kelas awal)</p>
+      <div id="lrPos"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  var $ = App.$, esc = App.esc;
+  var IND = ["Iqro' 1", "Iqro' 2", "Iqro' 3", "Iqro' 4", "Iqro' 5", "Iqro' 6", "Qur'an Kecil", "Qur'an Sedang", "Qur'an Besar"];
+
+  function tglPendek(ymd) { return ymd ? App.tgl(ymd) : ''; }
+  function kepBadge(k) {
+    return k === 'Lanjut' ? '<span class="lp-kep lanjut"><i data-lucide="trending-up"></i>Lanjut</span>'
+         : k === 'Tetap' ? '<span class="lp-kep tetap"><i data-lucide="minus"></i>Tetap</span>' : '';
+  }
+  function indChip(ind) {
+    var i = IND.indexOf(ind);
+    return ind ? '<span class="lp-ind' + (i >= 6 ? ' quran' : '') + '"><i data-lucide="' + (i >= 6 ? 'book-open' : 'book') + '"></i>' + esc(ind) + '</span>' : '';
+  }
+  /** Saran indikator: Lanjut → naik satu tingkat; Tetap → tetap. */
+  function saranIndikator(t) {
+    if (!t || !t.indikator) return (F.fasil && F.fasil.kelas) || IND[0];   // belum pernah dilaporkan → kelas fasilitator
+    var i = IND.indexOf(t.indikator);
+    return t.keputusan === 'Lanjut' && i >= 0 && i < IND.length - 1 ? IND[i + 1] : t.indikator;
+  }
+  function fillIndSelect(sel) {
+    sel.innerHTML = '<option value="">Semua indikator</option>' + IND.map(function (x) { return '<option>' + esc(x) + '</option>'; }).join('') +
+      (sel.id === 'lpIndikator' ? '<option value="__none">Belum ada indikator</option>' : '');
+  }
+  fillIndSelect($('#lpIndikator')); fillIndSelect($('#lrIndikator'));
+
+  function riwayatHtml(list) {
+    if (!list.length) return '<p class="dim" style="margin:0">Belum ada laporan.</p>';
+    return '<div class="lp-hist">' + list.map(function (l) {
+      return '<div class="lp-hist-item"><div class="lp-hist-top">' + indChip(l.indikator) + kepBadge(l.keputusan) +
+        '<span class="dim">' + esc(tglPendek(l.tanggal)) + '</span></div>' +
+        (l.keterangan ? '<div class="lp-hist-ket">' + esc(l.keterangan) + '</div>' : '') +
+        '<div class="dim" style="font-size:12px">oleh ' + esc(l.nama_fasilitator) + '</div></div>';
+    }).join('') + '</div>';
+  }
+
+  /* =====================================================================
+   * FASILITATOR: daftar jamaah binaan + form laporan
+   * ===================================================================== */
+  var F = { rows: [], today: '' };
+
+  function loadLapor() {
+    return App.api('fasilitatorHome').then(function (d) {
+      F.rows = d.rows; F.today = d.today; F.fasil = d.fasilitator;
+      renderLapor();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function lpFiltered() {
+    var q = App.norm($('#lpSearch').value), k = $('#lpKeputusan').value, ind = $('#lpIndikator').value;
+    return F.rows.filter(function (j) {
+      var t = j.terakhir;
+      if (k === '__belum' && t) return false;
+      if (k === '__hariini' && t && t.tanggal === F.today) return false;
+      if ((k === 'Tetap' || k === 'Lanjut') && (!t || t.keputusan !== k)) return false;
+      if (ind === '__none' ? t : (ind && (!t || t.indikator !== ind))) return false;
+      if (q && App.norm(j.nama + ' ' + j.nama_panggilan + ' ' + j.id_jamaah).indexOf(q) === -1) return false;
+      return true;
+    });
+  }
+
+  function renderLapor() {
+    var list = lpFiltered();
+    var sudahHariIni = F.rows.filter(function (j) { return j.terakhir && j.terakhir.tanggal === F.today; }).length;
+    var belum = F.rows.filter(function (j) { return !j.terakhir; }).length;
+    if (Admin.current === 'lapor') Admin.setSubtitle(F.rows.length + ' jamaah binaan · ' + sudahHariIni + ' dilaporkan hari ini');
+    Admin.setCount('lapor', F.rows.length - sudahHariIni, false);
+    $('#lpHello').innerHTML =
+      '<div><div class="lp-hello-t">Assalamu\'alaikum, ' + esc(((App.session || {}).nama || '').split(' ')[0] || 'Fasilitator') + '</div>' +
+      (F.fasil && F.fasil.kelas ? '<div class="lp-hello-kelas">' + indChip(F.fasil.kelas) + '<span class="dim">' + esc(F.fasil.kategori || '') + '</span></div>' : '') +
+      '<div class="dim">' + esc(App.tgl(F.today, true)) + ' · pilih jamaah lalu tekan <b>Laporkan</b></div></div>' +
+      '<div class="lp-hello-n"><b>' + sudahHariIni + '</b>/' + F.rows.length + '<span>hari ini</span></div>' +
+      (belum ? '<div class="lp-hello-note">' + belum + ' jamaah belum pernah dilaporkan</div>' : '');
+    $('#lpCards').innerHTML = !F.rows.length
+      ? '<div class="glass card empty">Belum ada jamaah binaan. Admin yang menentukan jamaah untuk setiap fasilitator.</div>'
+      : list.length ? list.map(function (j) {
+        var t = j.terakhir, hariIni = t && t.tanggal === F.today;
+        return '<div class="lp-card' + (hariIni ? ' done' : '') + '" data-id="' + esc(j.id_jamaah) + '">' +
+          '<div class="lp-card-top">' + App.avatar(j.thumb, j.nama, 52) +
+            '<div class="jc-main"><div class="jc-name">' + esc(j.nama) + '</div>' +
+            '<div class="jc-sub"><span class="mono">' + esc(j.id_jamaah) + '</span>' + (j.desa ? ' · ' + esc(j.desa) : '') + '</div></div>' +
+            (hariIni ? '<span class="lp-done" title="Sudah dilaporkan hari ini"><i data-lucide="check"></i></span>' : '') +
+          '</div>' +
+          '<div class="lp-card-last">' + (t
+            ? indChip(t.indikator) + kepBadge(t.keputusan) + '<span class="dim">' + esc(tglPendek(t.tanggal)) + '</span>'
+            : (F.fasil && F.fasil.kelas ? indChip(F.fasil.kelas) + '<span class="dim">kelas awal · belum dilaporkan</span>' : '<span class="dim">Belum pernah dilaporkan</span>')) + '</div>' +
+          (t && t.keterangan ? '<div class="lp-card-ket">“' + esc(t.keterangan) + '”</div>' : '') +
+          '<button type="button" class="btn ' + (hariIni ? '' : 'primary') + ' block" data-act="lapor"><i data-lucide="clipboard-pen"></i> ' +
+            (hariIni ? 'Laporkan lagi' : 'Laporkan') + '</button>' +
+        '</div>';
+      }).join('') : '<div class="glass card empty">Tidak ada jamaah yang cocok dengan filter.</div>';
+    App.icons();
+  }
+
+  function openLapor(j) {
+    var t = j.terakhir;
+    App.formModal({
+      title: 'Laporan Jamaah',
+      okText: 'Kirim Laporan',
+      confirmTitle: 'Kirim laporan?',
+      confirmText: 'Laporan untuk ' + j.nama + ' akan disimpan.',
+      values: { indikator: saranIndikator(t), keputusan: '' },
+      html:
+        '<div class="lp-form-head">' + App.avatar(j.thumb, j.nama, 56) +
+          '<div><div class="dim" style="font-size:12px">Nama jamaah</div><div class="jc-name" style="font-size:17px">' + esc(j.nama) + '</div>' +
+          '<div class="dim mono" style="font-size:12px">' + esc(j.id_jamaah) + (j.desa ? ' · ' + esc(j.desa) : '') + '</div></div></div>' +
+        (t ? '<div class="lp-form-last">Terakhir: ' + indChip(t.indikator) + kepBadge(t.keputusan) + '<span class="dim">' + esc(tglPendek(t.tanggal)) + '</span></div>' : '') +
+        '<label class="field"><span>Indikator jamaah *</span><select class="input" name="indikator" required>' +
+          IND.map(function (x) { return '<option>' + esc(x) + '</option>'; }).join('') + '</select></label>' +
+        '<div class="field"><span>Tetap atau Lanjut? *</span><div class="lp-choice">' +
+          '<label><input type="radio" name="keputusan" value="Tetap"><span><i data-lucide="minus"></i><b>Tetap</b><small>Masih di indikator ini</small></span></label>' +
+          '<label><input type="radio" name="keputusan" value="Lanjut"><span><i data-lucide="trending-up"></i><b>Lanjut</b><small>Naik ke indikator berikutnya</small></span></label>' +
+        '</div></div>' +
+        '<label class="field"><span>Keterangan</span><textarea class="input" name="keterangan" rows="3" maxlength="500" placeholder="mis. sudah lancar huruf sambung, perlu latihan mad"></textarea></label>' +
+        '<details class="lp-riwayat"><summary>Riwayat laporan</summary><div data-riwayat><p class="dim">Memuat…</p></div></details>',
+      onOpen: function (form) {
+        App.api('riwayatLaporanJamaah', j.id_jamaah).then(function (list) {
+          form.querySelector('[data-riwayat]').innerHTML = riwayatHtml(list);
+          App.icons();
+        }).catch(function () { form.querySelector('[data-riwayat]').innerHTML = '<p class="dim">Riwayat tidak bisa dimuat.</p>'; });
+      },
+      onSubmit: function (v) {
+        if (!v.keputusan) throw new Error('Pilih Tetap atau Lanjut.');
+        v.id_jamaah = j.id_jamaah;
+        return App.api('simpanLaporanFasilitator', v);
+      }
+    }).then(function (saved) {
+      if (!saved) return;
+      App.toast('Laporan tersimpan: ' + j.nama + ' · ' + saved.indikator + ' · ' + saved.keputusan, 'ok');
+      j.terakhir = { tanggal: saved.tanggal, indikator: saved.indikator, keputusan: saved.keputusan, keterangan: saved.keterangan };
+      renderLapor();
+    });
+  }
+
+  var tl;
+  $('#lpSearch').addEventListener('input', function () { clearTimeout(tl); tl = setTimeout(renderLapor, 120); });
+  $('#lpKeputusan').addEventListener('change', renderLapor);
+  $('#lpIndikator').addEventListener('change', renderLapor);
+  $('#lpCards').addEventListener('click', function (e) {
+    var c = e.target.closest('.lp-card[data-id]'); if (!c) return;
+    var j = F.rows.filter(function (x) { return x.id_jamaah === c.dataset.id; })[0];
+    if (j) openLapor(j);
+  });
+
+  Admin.register('lapor', {
+    title: 'Laporan Jamaah', nav: 'Laporan Jamaah', icon: 'clipboard-pen', only: ['fasilitator'],
+    subtitle: 'Perkembangan bacaan jamaah binaan', show: loadLapor
+  });
+
+  /* =====================================================================
+   * ADMIN: rekap laporan fasilitator
+   * ===================================================================== */
+  var R = { rows: [], posisi: [] };
+
+  function loadRekap() {
+    var opt = { id_fasilitator: $('#lrFasil').value, dari: $('#lrDari').value, sampai: $('#lrSampai').value };
+    return App.api('rekapLaporanFasilitator', opt).then(function (d) {
+      R.rows = d.rows; R.posisi = d.posisi;
+      var sel = $('#lrFasil'), cur = sel.value;
+      sel.innerHTML = '<option value="">Semua fasilitator</option>' + d.fasilitator.map(function (f) {
+        return '<option value="' + esc(f.id_fasilitator) + '">' + (f.kelas ? esc(f.kelas) + ' · ' : '') + esc(f.nama) + (f.status !== 'Aktif' ? ' (nonaktif)' : '') + '</option>';
+      }).join('');
+      sel.value = cur;
+      renderRekap();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function renderRekap() {
+    var q = App.norm($('#lrSearch').value), k = $('#lrKeputusan').value, ind = $('#lrIndikator').value;
+    var list = R.rows.filter(function (l) {
+      return (!k || l.keputusan === k) && (!ind || l.indikator === ind) &&
+        (!q || App.norm(l.nama_jamaah + ' ' + l.id_jamaah).indexOf(q) !== -1);
+    });
+    var lanjut = list.filter(function (l) { return l.keputusan === 'Lanjut'; }).length;
+    var jamaahDilapor = {}; list.forEach(function (l) { jamaahDilapor[l.id_jamaah] = 1; });
+    var belum = R.posisi.filter(function (p) { return p.dari_kelas; }).length;
+    if (Admin.current === 'laporan') Admin.setSubtitle(list.length + ' laporan · ' + Object.keys(jamaahDilapor).length + ' jamaah dilaporkan');
+    function stat(label, v, sub) { return '<div class="card kstat"><div class="l">' + label + '</div><div class="v">' + v + '</div>' + (sub ? '<div class="dim" style="font-size:12px">' + sub + '</div>' : '') + '</div>'; }
+    $('#lrStats').innerHTML =
+      stat('Jamaah binaan', R.posisi.length, belum + ' belum pernah dilaporkan') +
+      stat('Laporan', list.length, Object.keys(jamaahDilapor).length + ' jamaah') +
+      stat('Lanjut', lanjut, list.length ? Math.round(lanjut / list.length * 100) + '% dari laporan' : '') +
+      stat('Tetap', list.length - lanjut, '');
+    $('#lrBody').innerHTML = list.length ? list.slice(0, 500).map(function (l) {
+      return '<tr class="jm-row" data-id="' + esc(l.id_jamaah) + '" data-nm="' + esc(l.nama_jamaah) + '" title="Klik untuk riwayat">' +
+        '<td class="mono">' + esc(App.tgl(l.tanggal)) + '</td>' +
+        '<td><b>' + esc(l.nama_jamaah) + '</b><div class="dim mono">' + esc(l.id_jamaah) + '</div></td>' +
+        '<td>' + indChip(l.indikator) + '</td><td>' + kepBadge(l.keputusan) + '</td>' +
+        '<td class="hide-sm-col">' + esc(l.nama_fasilitator) + '</td>' +
+        '<td class="hide-sm-col">' + esc(l.keterangan || '–') + '</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="empty">Belum ada laporan pada filter ini.</td></tr>';
+    // Sebaran posisi indikator terkini
+    var cnt = {}; R.posisi.forEach(function (p) { var key = p.indikator || '__belum'; cnt[key] = (cnt[key] || 0) + 1; });
+    var max = Math.max.apply(null, [1].concat(Object.keys(cnt).map(function (x) { return cnt[x]; })));
+    $('#lrPos').innerHTML = IND.concat(['__belum']).map(function (x) {
+      var n = cnt[x] || 0;
+      if (x === '__belum' && !n) return '';
+      return '<div class="lr-bar' + (x === '__belum' ? ' none' : '') + '"><span class="lr-bar-l">' + (x === '__belum' ? 'Belum ada kelas' : esc(x)) + '</span>' +
+        '<span class="lr-bar-t"><i style="width:' + (n / max * 100) + '%"></i></span><b>' + n + '</b></div>';
+    }).join('');
+    App.icons();
+  }
+
+  ['#lrFasil', '#lrDari', '#lrSampai'].forEach(function (s) { $(s).addEventListener('change', loadRekap); });
+  ['#lrKeputusan', '#lrIndikator'].forEach(function (s) { $(s).addEventListener('change', renderRekap); });
+  var tr;
+  $('#lrSearch').addEventListener('input', function () { clearTimeout(tr); tr = setTimeout(renderRekap, 120); });
+  $('#lrBody').addEventListener('click', function (e) {
+    var row = e.target.closest('tr[data-id]'); if (!row) return;
+    App.loading(true);
+    App.api('riwayatLaporanJamaah', row.dataset.id).then(function (list) {
+      App.loading(false);
+      App.modal({ title: 'Riwayat · ' + row.dataset.nm, html: riwayatHtml(list), okText: 'Tutup', cancelText: false });
+    }).catch(function (er) { App.loading(false); App.toast(er.message, 'err'); });
+  });
+
+  Admin.register('laporan', {
+    title: 'Laporan Fasilitator', nav: 'Laporan Fasilitator', icon: 'book-open-check',
+    subtitle: 'Perkembangan bacaan jamaah dari fasilitator', show: loadRekap
+  });
+})();
+</script>

@@ -1,0 +1,225 @@
+<!-- kartu.html — cetak kartu jamaah (desain potret "Ngaji Bahagia"), QR / barcode berisi No Jamaah, A4 9 kartu/halaman.
+     Teks, logo, dan Instagram diambil otomatis dari menu Profil Yayasan. -->
+<section id="view-kartu" hidden>
+  <div class="kartu-layout">
+    <div class="card panel kartu-pick">
+      <div class="panel-head"><h2>Pilih jamaah</h2><span class="chip gold" id="kpCount">0 dipilih</span></div>
+      <div class="input-wrap"><i data-lucide="search"></i><input class="input" id="kpSearch" type="search" placeholder="Cari nama / ID…" autocomplete="off"></div>
+      <select class="input" id="kpKelompok"><option value="">Semua desa</option></select>
+      <div class="row">
+        <button class="btn sm" id="kpAll"><i data-lucide="check-check"></i> Pilih semua tampil</button>
+        <button class="btn sm ghost" id="kpNone">Kosongkan</button>
+      </div>
+      <div class="plist" id="kpList"></div>
+    </div>
+
+    <div class="stack" style="min-width:0">
+      <div class="card panel">
+        <div class="panel-head"><h2>Desain kartu</h2><span class="dim" id="kpPages"></span></div>
+        <div id="kpProfilNote"></div>
+        <p class="dim" style="margin:0">Kartu potret 54 × 85,6 mm (seukuran KTP), <b>9 kartu per A4</b>. Saat mencetak pilih kertas <b>A4</b>, skala <b>100% / Actual size</b>, dan aktifkan <b>Background graphics</b>.</p>
+      </div>
+      <div class="card panel">
+        <div class="panel-head"><h2>Pratinjau</h2><span class="dim">maks. 2 halaman</span></div>
+        <div class="preview-wrap" id="kpPreview"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ===== Renderer kartu (dipakai juga oleh halaman Profil Yayasan untuk pratinjau) ===== */
+window.Kartu = (function () {
+  var LIBS = {
+    qr: 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
+    bar: 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js'
+  };
+  var DEFAULT_LOGO = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M6 16c9-3 18-2 26 4 8-6 17-7 26-4v34c-9-3-18-2-26 4-8-6-17-7-26-4z" fill="none" stroke="#0b7a3e" stroke-width="4" stroke-linejoin="round"/><path d="M32 20v34" stroke="#0b7a3e" stroke-width="3"/><path d="M32 44c-7-5-11-9-11-13a5 5 0 0 1 11-2 5 5 0 0 1 11 2c0 4-4 8-11 13z" fill="#e8b730"/></svg>';
+  // Ornamen vektor bersih: sudut kanan atas melengkung + gelombang ganda di bawah, aksen garis emas.
+  // Gradient diberi ID unik per kartu: saat cetak, pratinjau disembunyikan sehingga url(#id) yang
+  // menunjuk ke kartu pratinjau tidak terlukis (warna hijau jadi pudar). ID unik → cetak = tampilan layar.
+  var uid = 0;
+  function splashTR() {
+    var id = 'k2gA' + (++uid);
+    return '<svg class="spl-tr" viewBox="0 0 100 80" aria-hidden="true"><defs>' +
+      '<linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16a34a"/><stop offset="1" stop-color="#064e3b"/></linearGradient></defs>' +
+      '<path d="M100 0V52C80 49 62 36 52 18 49 11 47 5 46 0z" fill="#16a34a" fill-opacity=".16"/>' +
+      '<path d="M100 0V38C85 36 72 27 65 14 62 8 61 4 60 0z" fill="url(#' + id + ')"/>' +
+      '<path d="M53 0C55 9 61 21 71 30 81 39 91 43 100 45" fill="none" stroke="#e8b730" stroke-width="1.3"/></svg>';
+  }
+  function splashBottom() {
+    var id = 'k2gB' + (++uid);
+    return '<svg class="spl-b" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true"><defs>' +
+      '<linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#064e3b"/><stop offset="1" stop-color="#0b7a3e"/></linearGradient></defs>' +
+      '<path d="M0 20C40 4 80 32 122 18 152 8 176 10 200 2V60H0z" fill="#16a34a" fill-opacity=".22"/>' +
+      '<path d="M0 32C45 16 86 42 126 28 156 18 180 20 200 13V60H0z" fill="url(#' + id + ')"/>' +
+      '<path d="M0 32C45 16 86 42 126 28 156 18 180 20 200 13" fill="none" stroke="#e8b730" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg>';
+  }
+  var CORNERS = '<svg class="k2-corners" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
+    '<path d="M0 14V0H14M86 0H100V14M100 86V100H86M14 100H0V86" fill="none" stroke="#0b7a3e" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round"/></svg>';
+  var IG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="none" stroke="#fff" stroke-width="2"/><circle cx="17.3" cy="6.7" r="1.3" fill="#fff"/></svg>';
+
+  function esc(s) { return App.esc(s); }
+
+  function ensureLibs(profil) {
+    var need = (profil && profil.kartu_kode === 'barcode') ? LIBS.bar : LIBS.qr;
+    return App.loadScript(need);
+  }
+
+  /** QR code sebagai SVG (modul hitam, tanpa margin; margin dari bingkai kartu). */
+  function qrSvg(text) {
+    var q = qrcode(0, 'M');
+    q.addData(String(text));
+    q.make();
+    var n = q.getModuleCount(), d = '';
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) if (q.isDark(r, c)) d += 'M' + c + ' ' + r + 'h1v1h-1z';
+    return '<svg viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges" class="k2-qr"><path d="' + d + '" fill="#000"/></svg>';
+  }
+
+  function barSvg(text) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    JsBarcode(svg, text, { format: 'CODE128', width: 2, height: 60, margin: 0, displayValue: false, background: '#ffffff', lineColor: '#000000' });
+    var w = parseFloat(svg.getAttribute('width')), h = parseFloat(svg.getAttribute('height'));
+    svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.removeAttribute('width'); svg.removeAttribute('height'); svg.removeAttribute('style');
+    svg.setAttribute('class', 'k2-bar');
+    return svg.outerHTML;
+  }
+
+  /** HTML satu kartu. j = {id_jamaah, nama}, p = profil yayasan. */
+  function html(j, p) {
+    p = p || {};
+    var bar = p.kartu_kode === 'barcode';
+    var logo = p.logo ? '<img src="' + esc(p.logo) + '" alt="">' : DEFAULT_LOGO;
+    return '<div class="kartu2">' + splashTR() +
+      '<div class="k2-head"><div class="k2-logo">' + logo + (p.singkatan ? '<span>' + esc(p.singkatan) + '</span>' : '') + '</div>' +
+        '<div class="k2-title"><b>' + esc(p.kartu_judul1 || 'NGAJI') + '</b><b class="g">' + esc(p.kartu_judul2 || 'BAHAGIA') + '</b>' +
+          ((p.nama_program || p.nama_yayasan) ? '<small>' + esc(p.nama_program || p.nama_yayasan) + '</small>' : '') + '</div></div>' +
+      '<div class="k2-code' + (bar ? ' bar' : '') + '">' + CORNERS + (bar ? barSvg(j.id_jamaah) : qrSvg(j.id_jamaah)) + '</div>' +
+      (p.kartu_tagline ? '<div class="k2-tag">' + esc(p.kartu_tagline) + '</div>' : '') +
+      (p.kartu_nama === 'ya' ? '<div class="k2-nama">' + esc(j.nama) + '</div>' : '') +
+      '<div class="k2-id">' + esc(j.id_jamaah) + '</div>' +
+      '<div class="k2-foot">' + splashBottom() +
+        (p.instagram ? '<span class="k2-ig">' + IG + esc(p.instagram) + '</span>' : (p.nama_yayasan ? '<span class="k2-ig">' + esc(p.nama_yayasan) + '</span>' : '')) +
+      '</div></div>';
+  }
+
+  return { html: html, ensureLibs: ensureLibs, qrSvg: qrSvg, DEFAULT_LOGO: DEFAULT_LOGO };
+})();
+
+(function () {
+  var $ = App.$;
+  var PER_PAGE = 9;
+  var state = { rows: [], selected: {}, profil: null };
+
+  function load() {
+    return Promise.all([App.api('listJamaah'), App.api('getProfil')]).then(function (res) {
+      var d = res[0];
+      state.profil = res[1];
+      state.rows = d.rows.filter(function (j) { return j.status === 'Aktif'; })
+        .sort(function (a, b) { return a.id_jamaah.localeCompare(b.id_jamaah, 'id', { numeric: true }); });
+      $('#kpKelompok').innerHTML = '<option value="">Semua desa</option>' +
+        (d.desa || []).map(function (k) { return '<option>' + App.esc(k) + '</option>'; }).join('');
+      var p = state.profil;
+      $('#kpProfilNote').innerHTML = (p.lengkap ? '' :
+        '<div class="auth-info" style="margin-bottom:8px"><i data-lucide="triangle-alert"></i><span><b>Profil yayasan belum lengkap.</b> Isi nama yayasan & unggah logo supaya kartu tampil profesional.</span></div>') +
+        '<div class="row"><span class="chip">' + (p.kartu_kode === 'barcode' ? 'Barcode CODE128' : 'QR code') + '</span>' +
+        '<span class="chip">' + App.esc((p.kartu_judul1 || '') + ' ' + (p.kartu_judul2 || '')) + '</span>' +
+        (p.instagram ? '<span class="chip">@' + App.esc(p.instagram) + '</span>' : '') +
+        '<button class="btn sm" data-go-profil><i data-lucide="building-2"></i> Ubah di Profil Yayasan</button></div>';
+      App.icons();
+      return Kartu.ensureLibs(p);
+    });
+  }
+
+  function visible() {
+    var q = App.norm($('#kpSearch').value), k = $('#kpKelompok').value;
+    return state.rows.filter(function (j) {
+      return (!k || j.desa === k) && (!q || App.norm(j.nama + ' ' + (j.nama_panggilan || '') + ' ' + j.id_jamaah).indexOf(q) !== -1);
+    });
+  }
+  function selectedRows() { return state.rows.filter(function (j) { return state.selected[j.id_jamaah]; }); }
+
+  function renderList() {
+    var list = visible();
+    $('#kpList').innerHTML = list.length ? list.map(function (j) {
+      return '<label class="prow"><input type="checkbox" value="' + App.esc(j.id_jamaah) + '"' + (state.selected[j.id_jamaah] ? ' checked' : '') + '>' +
+        '<div class="grow"><b>' + App.esc(j.nama) + '</b><small class="mono">' + App.esc(j.id_jamaah) + (j.desa ? ' · ' + App.esc(j.desa) : '') + '</small></div></label>';
+    }).join('') : '<div class="empty">Tidak ada jamaah aktif yang cocok.</div>';
+  }
+
+  function pagesHtml(rows, maxPages) {
+    var html = '', pages = Math.ceil(rows.length / PER_PAGE);
+    for (var p = 0; p < Math.min(pages, maxPages || pages); p++) {
+      html += '<div class="a4 a4-k2">' + rows.slice(p * PER_PAGE, (p + 1) * PER_PAGE).map(function (j) { return Kartu.html(j, state.profil); }).join('') + '</div>';
+    }
+    return html;
+  }
+
+  var previewTimer;
+  function renderPreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(function () {
+      var rows = selectedRows(), pages = Math.ceil(rows.length / PER_PAGE);
+      $('#kpCount').textContent = rows.length + ' dipilih';
+      $('#kpPages').textContent = rows.length ? rows.length + ' kartu · ' + pages + ' halaman A4' : '';
+      var box = $('#kpPreview');
+      if (!rows.length) { box.innerHTML = '<div class="empty">Centang jamaah di sebelah kiri untuk melihat pratinjau kartu.</div>'; return; }
+      box.innerHTML = pagesHtml(rows, 2);
+      var mm = 3.7795, sc = Math.min(1, (box.clientWidth - 4) / (210 * mm));
+      App.$$('.a4', box).forEach(function (pg) {
+        pg.style.transform = 'scale(' + sc + ')';
+        pg.style.marginBottom = (-(296 * mm) * (1 - sc) + 18) + 'px';
+      });
+    }, 120);
+  }
+
+  function print() {
+    var rows = selectedRows();
+    if (!rows.length) { App.toast('Pilih minimal 1 jamaah.', 'warn'); return; }
+    var root = document.getElementById('printRoot');
+    if (!root) { root = document.createElement('div'); root.id = 'printRoot'; document.body.appendChild(root); }
+    root.innerHTML = pagesHtml(rows);
+    document.body.classList.add('printing');
+    var done = false;
+    function cleanup() { if (done) return; done = true; document.body.classList.remove('printing'); root.innerHTML = ''; }
+    window.addEventListener('afterprint', cleanup, { once: true });
+    App.api('logCetakKartu', rows.map(function (j) { return j.id_jamaah; })).catch(function () {});
+    // tunggu logo (gambar) termuat sebelum dialog cetak
+    var imgs = App.$$('img', root).map(function (im) { return im.complete ? null : new Promise(function (r) { im.onload = im.onerror = r; }); }).filter(Boolean);
+    Promise.all(imgs).then(function () {
+      setTimeout(function () {
+        try { window.print(); } catch (e) { App.toast('Browser memblokir cetak: ' + e.message, 'err'); cleanup(); }
+        setTimeout(cleanup, 1500);
+      }, 150);
+    });
+  }
+
+  var t;
+  $('#kpSearch').addEventListener('input', function () { clearTimeout(t); t = setTimeout(renderList, 120); });
+  $('#kpKelompok').addEventListener('change', renderList);
+  $('#kpList').addEventListener('change', function (e) {
+    if (e.target.type !== 'checkbox') return;
+    if (e.target.checked) state.selected[e.target.value] = true; else delete state.selected[e.target.value];
+    renderPreview();
+  });
+  $('#kpAll').addEventListener('click', function () { visible().forEach(function (j) { state.selected[j.id_jamaah] = true; }); renderList(); renderPreview(); });
+  $('#kpNone').addEventListener('click', function () { state.selected = {}; renderList(); renderPreview(); });
+  $('#view-kartu').addEventListener('click', function (e) { if (e.target.closest('[data-go-profil]')) Admin.go('profil'); });
+  window.addEventListener('resize', function () { if (Admin.current === 'kartu') renderPreview(); });
+
+  Admin.register('kartu', {
+    title: 'Cetak Kartu Jamaah', nav: 'Kartu Jamaah', icon: 'id-card',
+    subtitle: 'Kartu QR untuk discan petugas saat absensi',
+    actions: [{ label: 'Cetak', icon: 'printer', cls: 'primary', onClick: print }],
+    show: function (arg) {
+      if (arg && arg.ids) { state.selected = {}; arg.ids.forEach(function (id) { state.selected[id] = true; }); }
+      App.loading(true);
+      load().then(function () { renderList(); renderPreview(); })
+        .catch(function (e) { App.toast(e.message, 'err'); })
+        .finally(function () { App.loading(false); });
+    }
+  });
+})();
+</script>

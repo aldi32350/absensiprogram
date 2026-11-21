@@ -1,0 +1,1143 @@
+<!-- absensi.html — aplikasi petugas: pilih program → SCAN (kamera / scanner / manual) → daftar hadir -->
+<div id="ptgApp" hidden>
+
+  <!-- ============ BERANDA: pilih program ============ -->
+  <section id="scrHome" class="ptg">
+    <header class="ptg-head">
+      <div class="brand-logo"><i data-lucide="scan-barcode"></i></div>
+      <div class="t"><b>Absensi Jamaah</b><span id="homeName"></span></div>
+      <span class="sync" data-sync>Tersimpan</span>
+    </header>
+    <div style="padding:6px 16px 10px">
+      <h1 style="margin:0;font-size:1.35rem" id="homeHello">Pilih program</h1>
+      <p class="muted" style="margin:2px 0 0" id="homeDate"></p>
+    </div>
+    <div class="prog-list" id="homeList"></div>
+    <div style="padding:0 16px">
+      <button class="btn ghost block lg" id="homeLogout"><i data-lucide="log-out"></i> Keluar</button>
+    </div>
+  </section>
+
+  <!-- ============ SCAN ============ -->
+  <section id="scrScan" class="scan-screen" hidden>
+    <header class="ptg-head">
+      <button class="round" id="scanBack" aria-label="Kembali ke daftar program"><i data-lucide="chevron-left"></i></button>
+      <div class="t"><b id="scanTitle">Program</b><span id="scanSub"></span></div>
+      <span class="sync" data-sync>Tersimpan</span>
+    </header>
+
+    <div class="cam-wrap">
+      <div id="reader"></div>
+      <div class="guide" aria-hidden="true"></div>
+      <!-- Mode absen: HADIR (datang) atau SELESAI (pulang → hadiah untuk yang hadir) -->
+      <div class="mode-seg" role="group" aria-label="Mode absen">
+        <button type="button" data-mode="hadir" class="on"><i data-lucide="log-in"></i> HADIR</button>
+        <button type="button" data-mode="selesai"><i data-lucide="gift"></i> SELESAI</button>
+      </div>
+      <div class="cam-btns">
+        <button class="round" id="btnTorch" aria-label="Senter" hidden><i data-lucide="flashlight"></i></button>
+        <button class="round" id="btnSwitch" aria-label="Ganti kamera"><i data-lucide="switch-camera"></i></button>
+      </div>
+      <div class="cam-msg" id="camMsg" hidden>
+        <i data-lucide="camera-off"></i>
+        <div id="camMsgText">Kamera tidak bisa dibuka.</div>
+        <button class="btn" id="camRetry"><i data-lucide="refresh-cw"></i> Coba lagi</button>
+      </div>
+      <div class="scan-result" id="scanResult" aria-live="assertive">
+        <div class="sr-idle">Arahkan QR / barcode kartu ke dalam kotak</div>
+      </div>
+    </div>
+
+    <div class="scan-info">
+      <div class="glass counter" style="border-radius:18px">
+        <div><div class="num" id="cntNum">0<small>/0</small></div><div class="lbl">Hadir</div></div>
+        <div class="bar"><i id="cntBar" style="width:0%"></i></div>
+      </div>
+      <div class="scan-actions">
+        <button class="btn primary manual" id="btnManual"><i data-lucide="keyboard"></i> Input Manual</button>
+        <button class="btn manual" id="btnDaftar"><i data-lucide="user-plus"></i> Daftar Baru</button>
+      </div>
+    </div>
+    <input class="kbd-catcher" id="kbdCatcher" inputmode="none" autocomplete="off" aria-hidden="true" tabindex="-1">
+  </section>
+
+  <!-- ============ DAFTAR KEHADIRAN ============ -->
+  <section id="scrList" class="ptg" hidden>
+    <header class="ptg-head">
+      <div class="t"><b id="listTitle">Daftar Kehadiran</b><span id="listSub"></span></div>
+      <span class="sync" data-sync>Tersimpan</span>
+    </header>
+    <div class="glass seg-tabs">
+      <button data-ltab="hadir" class="active">Hadir (<span id="tabHadirN">0</span>)</button>
+      <button data-ltab="belum">Belum (<span id="tabBelumN">0</span>)</button>
+      <button data-ltab="selesai">Selesai 🎁 (<span id="tabSelesaiN">0</span>)</button>
+    </div>
+    <div class="att-list" id="attList"></div>
+    <div class="close-bar">
+      <button class="btn danger block lg" id="btnTutup"><i data-lucide="lock"></i> Tutup Sesi &amp; Tandai Sisanya Alpa</button>
+    </div>
+  </section>
+
+  <nav class="bottombar" id="ptgNav" hidden aria-label="Navigasi petugas">
+    <button data-nav="scan" class="active"><i data-lucide="scan-barcode"></i>Scan</button>
+    <button data-nav="list"><i data-lucide="list-checks"></i>Daftar</button>
+    <button data-nav="logout"><i data-lucide="log-out"></i>Keluar</button>
+  </nav>
+</div>
+
+<script>
+(function () {
+  var $ = App.$;
+  var QR_URL = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+  var COOLDOWN = 1500;                       // jeda antar scan kamera (ms)
+  var K_HOME = 'ptg_home', K_QUEUE = 'ptg_queue', K_CUR = 'ptg_current', K_SESI = 'ptg_sesi_';
+
+  var S = {
+    home: null, sesiId: null, sesi: null, program: null,
+    jamaah: {}, peserta: {}, pesertaN: 0, records: {},
+    screen: 'home', listTab: 'hadir',
+    cam: null, camRunning: false, camStarting: false, facing: 'environment', torch: null, torchOn: false,
+    pausedUntil: 0, sheetOpen: false, kbuf: '', ktimer: null,
+    flushing: false, retryMs: 5000, retryTimer: null, pollTimer: null, online: true
+  };
+
+  /* =========================================================
+   * Suara & getar
+   * ========================================================= */
+  var audio = null;
+  function unlockAudio() {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+    } catch (e) { audio = null; }
+  }
+  document.addEventListener('pointerdown', unlockAudio, { passive: true });
+  document.addEventListener('keydown', unlockAudio);
+  function tone(freq, start, dur, type, vol) {
+    var o = audio.createOscillator(), g = audio.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.25, audio.currentTime + start);
+    g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + start + dur);
+    o.connect(g); g.connect(audio.destination);
+    o.start(audio.currentTime + start); o.stop(audio.currentTime + start + dur + 0.02);
+  }
+  function feedbackSound(kind) {
+    try {
+      if (audio) {
+        if (kind === 'ok') { tone(1046, 0, 0.12, 'sine', 0.3); tone(1568, 0.1, 0.16, 'sine', 0.25); }
+        else if (kind === 'dup') { tone(660, 0, 0.1, 'triangle'); tone(660, 0.16, 0.1, 'triangle'); }
+        else { tone(196, 0, 0.45, 'square', 0.18); }
+      }
+      if (navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) navigator.vibrate(kind === 'ok' ? 120 : kind === 'dup' ? [60, 60, 60] : [250, 80, 250]);
+    } catch (e) {}
+  }
+
+  /* =========================================================
+   * Penyimpanan lokal
+   * ========================================================= */
+  function queue() { return App.store.get(K_QUEUE, []); }
+  function setQueue(q) { App.store.set(K_QUEUE, q); updateSync(); }
+  function saveSesiCache() {
+    if (!S.sesiId) return;
+    App.store.set(K_SESI + S.sesiId, { sesi: S.sesi, program: S.program, jamaah: S.jamaahRaw, peserta: Object.keys(S.peserta), records: S.records, formMeta: S.formMeta, thumbs: S.thumbs, savedAt: Date.now() });
+  }
+  function cleanupCaches() {
+    try {
+      Object.keys(localStorage).forEach(function (k) {
+        if (k.indexOf(K_SESI) !== 0) return;
+        var v = App.store.get(k.substring(0), null);
+        if (!v || !v.savedAt || Date.now() - v.savedAt > 3 * 86400000) localStorage.removeItem(k);
+      });
+    } catch (e) {}
+  }
+
+  function updateSync() {
+    var n = queue().length;
+    App.$$('[data-sync]').forEach(function (el) {
+      el.classList.toggle('wait', n > 0 && S.online);
+      el.classList.toggle('off', !S.online);
+      el.textContent = !S.online ? (n ? 'Offline · ' + n : 'Offline') : (n ? n + ' menunggu' : 'Tersimpan');
+    });
+  }
+
+  /* =========================================================
+   * Navigasi layar
+   * ========================================================= */
+  function show(screen) {
+    S.screen = screen;
+    $('#scrHome').hidden = screen !== 'home';
+    $('#scrScan').hidden = screen !== 'scan';
+    $('#scrList').hidden = screen !== 'list';
+    $('#ptgNav').hidden = screen === 'home';
+    App.$$('#ptgNav [data-nav]').forEach(function (b) { b.classList.toggle('active', b.dataset.nav === screen); });
+    if (screen === 'scan') { startCamera(); focusCatcher(); } else stopCamera();
+    if (screen === 'list') renderList();
+    window.scrollTo(0, 0);
+  }
+
+  /* =========================================================
+   * BERANDA
+   * ========================================================= */
+  function loadHome(autoEnter) {
+    App.loading(true);
+    return App.api('petugasHome').then(function (h) {
+      S.online = true; S.home = h; App.store.set(K_HOME, h);
+      return h;
+    }).catch(function (e) {
+      if (e.network) { S.online = false; return App.store.get(K_HOME, null); }
+      if (e.code !== 'EXPIRED') App.toast(e.message, 'err');
+      return null;
+    }).then(function (h) {
+      App.loading(false);
+      updateSync();
+      if (!h) { $('#homeList').innerHTML = '<div class="glass card empty">Tidak bisa memuat data. Periksa internet lalu buka ulang.</div>'; return; }
+      S.home = h;
+      renderHome();
+      if (!autoEnter) return;
+      // Lanjutkan sesi terakhir (mis. setelah HP di-refresh) atau masuk otomatis bila hanya 1 sesi dibuka.
+      var openList = [];
+      h.programs.forEach(function (p) { p.sesi.forEach(function (x) { if (x.status === 'Dibuka') openList.push(x.id_sesi); }); });
+      var cur = App.store.get(K_CUR, '');
+      if (cur && openList.indexOf(cur) !== -1) openSesi(cur);
+      else if (openList.length === 1 && h.programs.filter(function (p) { return p.sesi.some(function (x) { return x.status === 'Dibuka'; }); }).length === 1) openSesi(openList[0]);
+    });
+  }
+
+  function renderHome() {
+    var h = S.home, s = App.session || {};
+    $('#homeName').textContent = s.nama || h.nama || '';
+    $('#homeHello').textContent = 'Assalamu\'alaikum, ' + ((s.nama || h.nama || '').split(' ')[0] || 'Petugas');
+    $('#homeDate').textContent = App.tgl(h.today, true) + ' · pilih program untuk mulai absensi';
+    $('#homeList').innerHTML = h.programs.length ? h.programs.map(function (p) {
+      var open = p.sesi.filter(function (x) { return x.status === 'Dibuka'; }).pop();
+      var closed = !open && p.sesi.length;
+      var sub = open ? 'Sesi dibuka ' + App.esc(open.jam_mulai || '') + ' · ' + open.hadir + ' / ' + p.peserta + ' hadir'
+              : closed ? 'Sesi hari ini sudah ditutup' : 'Belum ada sesi hari ini · ' + p.peserta + ' peserta';
+      var btn = open ? '<button class="btn success xl block" data-open="' + App.esc(open.id_sesi) + '"><i data-lucide="scan-barcode"></i> Mulai Scan</button>'
+              : closed ? '' : '<button class="btn gold xl block" data-buka="' + App.esc(p.id_program) + '"><i data-lucide="calendar-plus"></i> Buka Sesi Hari Ini</button>';
+      return '<div class="glass card prog-tile">' +
+        '<div class="pt-top"><div class="pt-ic"><i data-lucide="calendar-check"></i></div>' +
+        '<div class="grow"><div class="pt-name">' + App.esc(p.nama_program) + '</div><div class="pt-sub">' + sub + '</div></div></div>' +
+        btn + '</div>';
+    }).join('') : '<div class="glass card empty">Anda belum ditugaskan ke program aktif. Hubungi admin.</div>';
+    App.icons();
+  }
+
+  $('#homeList').addEventListener('click', function (e) {
+    var o = e.target.closest('[data-open]'), b = e.target.closest('[data-buka]');
+    if (o) openSesi(o.dataset.open);
+    if (b) {
+      App.confirm('Buka sesi hari ini?', 'Sesi baru untuk tanggal ' + App.tgl(App.today(), true) + ' akan dibuka.').then(function (yes) {
+        if (!yes) return;
+        App.busy(b, App.api('bukaSesiHariIni', b.dataset.buka)).then(function (sesi) {
+          App.toast('Sesi hari ini dibuka', 'ok');
+          openSesi(sesi.id_sesi);
+        }).catch(function (err) { App.toast(err.message, 'err', 5000); });
+      });
+    }
+  });
+
+  /* =========================================================
+   * SESI: muat data ke HP
+   * ========================================================= */
+  function applySesiData(d) {
+    S.sesi = d.sesi; S.program = d.program; S.sesiId = d.sesi.id_sesi;
+    S.jamaahRaw = d.jamaah;
+    if (d.thumbs) S.thumbs = d.thumbs;
+    if (d.formMeta) S.formMeta = d.formMeta;
+    S.jamaah = {};
+    // Urutan array dari server (getSesiData). 'kelompok' = desa (dipakai sebagai keterangan singkat di daftar).
+    d.jamaah.forEach(function (j) {
+      S.jamaah[j[0]] = {
+        id: j[0], nama: j[1], kelompok: j[2], desa: j[2] || '', jk: j[3], panggilan: j[4] || '',
+        tanggal_lahir: j[5] || '', pekerjaan: j[6] || '', no_hp: j[7] || '', rt: j[8] || '', rw: j[9] || '',
+        kecamatan: j[10] || '', kota: j[11] || '', provinsi: j[12] || '', no_kk: j[13] || '', alamat: j[14] || '',
+        catatan: j[15] || '', fasilitator: j[16] || '', tanggal_daftar: j[17] || ''
+      };
+    });
+    S.peserta = {};
+    d.peserta.forEach(function (id) { S.peserta[id] = true; });
+    S.pesertaN = d.peserta.length;
+  }
+
+  function mergeServerRecords(list) {
+    var pendingIds = {};
+    queue().forEach(function (q) { if (q.id_sesi === S.sesiId) pendingIds[q.id_jamaah] = true; });
+    var next = {};
+    Object.keys(S.records).forEach(function (id) { if (pendingIds[id]) next[id] = S.records[id]; });
+    list.forEach(function (r) {
+      if (!next[r.id_jamaah]) next[r.id_jamaah] = { status: r.status, waktu: r.waktu, metode: r.metode, selesai: r.selesai || '', hadiah: r.hadiah || '' };
+      else if (r.selesai && !next[r.id_jamaah].selesai) next[r.id_jamaah].selesai = r.selesai;   // selesai dicatat petugas lain
+    });
+    applyQueuedSelesai(next);
+    S.records = next;
+  }
+  /** Absen SELESAI yang masih di antrean HP tetap ditampilkan sampai terkirim. */
+  function applyQueuedSelesai(recs) {
+    queue().forEach(function (q) {
+      if (q.aksi === 'selesai' && q.id_sesi === S.sesiId && recs[q.id_jamaah] && !recs[q.id_jamaah].selesai) {
+        recs[q.id_jamaah].selesai = q.waktu; recs[q.id_jamaah].hadiah = 'Ya'; recs[q.id_jamaah].pendingSelesai = true;
+      }
+    });
+  }
+
+  function openSesi(id) {
+    App.loading(true);
+    App.api('getSesiData', id).then(function (d) {
+      S.online = true;
+      S.records = {};
+      applySesiData(d);
+      // Data yang masih di antrean tetap ditampilkan.
+      queue().forEach(function (q) { if (q.id_sesi === id && q.aksi !== 'selesai') S.records[q.id_jamaah] = { status: q.status, waktu: q.waktu, metode: q.metode, pending: true }; });
+      mergeServerRecords(d.records);
+      return true;
+    }).catch(function (e) {
+      if (!e.network) { App.toast(e.message, 'err', 5000); return false; }
+      S.online = false;
+      var c = App.store.get(K_SESI + id, null);
+      if (!c) { App.toast('Offline dan data sesi belum tersimpan di HP ini.', 'err', 5000); return false; }
+      applySesiData({ sesi: c.sesi, program: c.program, jamaah: c.jamaah, peserta: c.peserta, thumbs: c.thumbs, formMeta: c.formMeta });
+      S.records = c.records || {};
+      App.toast('Mode offline: data akan dikirim saat online.', 'warn', 4000);
+      return true;
+    }).then(function (ok) {
+      App.loading(false);
+      if (!ok) return;
+      App.store.set(K_CUR, id);
+      saveSesiCache();
+      $('#scanTitle').textContent = S.program.nama_program;
+      $('#listTitle').textContent = S.program.nama_program;
+      var sub = App.tgl(S.sesi.tanggal, true) + (S.sesi.jam_mulai ? ' · ' + S.sesi.jam_mulai : '');
+      $('#scanSub').textContent = sub; $('#listSub').textContent = sub;
+      setMode(App.store.get('ptg_mode', 'hadir'));   // juga mereset banner & counter
+      updateSync();
+      show('scan');
+      startPolling();
+      flush();
+    });
+  }
+
+  function leaveSesi() {
+    stopPolling();
+    App.store.del(K_CUR);
+    S.sesiId = null;
+    show('home');
+    loadHome(false);
+  }
+
+  /* =========================================================
+   * Proses barcode / input
+   * ========================================================= */
+  function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  /** Inti absensi: dicek di HP dulu (instan), lalu dikirim ke server di latar belakang. */
+  function record(code, status, metode, silentDup) {
+    // Mode SELESAI: scan kartu (kamera/scanner) dicatat sebagai selesai + hadiah.
+    if (S.mode === 'selesai' && status === 'Hadir' && metode !== 'Manual') return recordSelesai(code, metode);
+    var id = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+    var j = S.jamaah[id];
+    if (!j) { showResult('err', 'Barcode tidak terdaftar', id ? 'Kode: ' + id + ' · tidak ada / nonaktif' : ''); return 'err'; }
+    var r = S.records[id];
+    if (r) {
+      var dupMsg = r.status === 'Hadir' ? 'Sudah absen jam ' + App.jam(r.waktu) : 'Sudah tercatat ' + r.status + ' jam ' + App.jam(r.waktu);
+      // Scan kamera/scanner → langsung buka profil lengkap (bukan banner kuning).
+      if (metode !== 'Manual' && !silentDup) {
+        if (baruDitutup(id)) return 'dup';         // kartu yang sama masih di depan kamera
+        openVerifikasi(id, 'info', metode, dupMsg); return 'dup';
+      }
+      showResult('dup', j.nama, dupMsg, id);
+      return 'dup';
+    }
+    // Hasil scan kamera/scanner → cek data & foto dulu: SALAH (ulang scan) / BENAR (catat HADIR).
+    if (metode !== 'Manual' && !silentDup) { openVerifikasi(id, 'hadir', metode); return 'verify'; }
+    return commitHadir(id, status, metode);
+  }
+
+  /** Simpan HADIR (setelah BENAR / input manual). */
+  function commitHadir(id, status, metode) {
+    var j = S.jamaah[id];
+    if (S.records[id]) return 'dup';
+    var waktu = App.nowStr();
+    S.records[id] = { status: status, waktu: waktu, metode: metode, pending: true };
+    var q = queue();
+    q.push({ client_id: newId(), id_sesi: S.sesiId, id_jamaah: id, status: status, metode: metode, waktu: waktu });
+    setQueue(q);
+    saveSesiCache();
+    var label = status === 'Hadir' ? 'HADIR ✓' : status.toUpperCase() + ' ✓';
+    showResult('ok', j.nama, label + (S.peserta[id] ? '' : ' · bukan peserta program'), id);
+    updateCounter();
+    if (S.screen === 'list') renderList();
+    flushSoon();
+    return 'ok';
+  }
+
+  /**
+   * Absen SELESAI: hanya untuk jamaah yang tadi tercatat HADIR di sesi ini → berikan hadiah.
+   * Dicek di HP (instan) lalu dikirim ke server (catatSelesai), server tetap penentu akhir.
+   */
+  function recordSelesai(code, metode) {
+    var id = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+    var j = S.jamaah[id];
+    if (!j) { showResult('err', 'Barcode tidak terdaftar', id ? 'Kode: ' + id + ' · tidak ada / nonaktif' : ''); return 'err'; }
+    var r = S.records[id];
+    if (!r) { showResult('err', j.nama, 'Belum absen HADIR — tidak dapat hadiah', id); return 'err'; }
+    if (r.status !== 'Hadir') { showResult('err', j.nama, 'Tercatat ' + r.status + ' — tidak dapat hadiah', id); return 'err'; }
+    if (r.selesai) {
+      var msg = 'Sudah selesai jam ' + App.jam(r.selesai) + ' — hadiah sudah diberikan';
+      if (metode !== 'Manual') { if (!baruDitutup(id)) openVerifikasi(id, 'info', metode, msg); return 'dup'; }
+      showResult('dup', j.nama, msg, id); return 'dup';
+    }
+    if (metode !== 'Manual') { openVerifikasi(id, 'selesai', metode); return 'verify'; }
+    return commitSelesai(id, metode);
+  }
+
+  /** Simpan SELESAI + hadiah (setelah BENAR / input manual). */
+  function commitSelesai(id, metode) {
+    var j = S.jamaah[id], r = S.records[id];
+    if (!r || r.status !== 'Hadir' || r.selesai) return 'dup';
+    var waktu = App.nowStr();
+    r.selesai = waktu; r.hadiah = 'Ya'; r.pendingSelesai = true;
+    var q = queue();
+    q.push({ client_id: newId(), id_sesi: S.sesiId, id_jamaah: id, aksi: 'selesai', metode: metode, waktu: waktu });
+    setQueue(q);
+    saveSesiCache();
+    showResult('ok', j.nama, 'SELESAI ✓ · Berikan hadiah 🎁', id);
+    updateCounter();
+    if (S.screen === 'list') renderList();
+    flushSoon();
+    return 'ok';
+  }
+
+  /**
+   * Layar verifikasi setelah scan: foto + data lengkap jamaah, tombol SALAH / BENAR.
+   *  SALAH → tidak dicatat, kembali scan dari awal.
+   *  BENAR → mode HADIR: tercatat HADIR · mode SELESAI: tercatat SELESAI + menerima hadiah.
+   */
+  /** true bila kartu ini baru saja ditutup lembarnya (hindari lembar muncul berulang saat kartu masih di depan kamera). */
+  function baruDitutup(id) {
+    return S.lastClosed && S.lastClosed.id === id && Date.now() - S.lastClosed.t < 4000;
+  }
+
+  function openVerifikasi(id, aksi, metode, infoMsg) {
+    var j = S.jamaah[id], th = (S.thumbs || {})[id], esc = App.esc;
+    var info = aksi === 'info';
+    S.sheetOpen = true;
+    try { if (S.cam && S.camRunning) S.cam.pause(true); } catch (e) {}
+    feedbackSound('dup');
+    var v = document.createElement('div');
+    v.className = 'sheet verif' + (aksi === 'selesai' ? ' verif-selesai' : '') + (info ? ' verif-info' : '');
+    v.innerHTML =
+      '<div class="verif-head"><b>' + (info ? '⚠️ ' + esc(infoMsg || 'Sudah tercatat') : aksi === 'selesai' ? '🎁 Cek data · SELESAI' : 'Cek data · HADIR') + '</b>' +
+        '<span>' + (info ? 'Jamaah ini sudah tercatat — tidak perlu dicatat lagi' : 'Pastikan orang di depan Anda sesuai foto & data') + '</span></div>' +
+      '<div class="sheet-body">' +
+        '<div class="glass card picked"><div data-pfoto style="margin-bottom:10px">' +
+          (th ? '<img class="foto-big" style="max-width:170px" src="' + esc(th) + '" alt="">' : App.avatar('', j.nama, 96)) + '</div>' +
+          '<div class="dim mono">' + esc(id) + '</div><div class="nm">' + esc(j.nama) + '</div>' +
+          '<div class="muted">' + esc(j.desa || '') + (S.peserta[id] ? '' : ' · bukan peserta program') + '</div>' +
+          (aksi === 'selesai' && S.records[id] ? '<p style="margin-top:10px">' + App.statusBadge('Hadir') + ' sejak jam ' + esc(App.jam(S.records[id].waktu)) + '</p>' : '') +
+          profilHtml(j) + '</div>' +
+      '</div>' +
+      '<div class="verif-bar">' + (info
+        ? '<button type="button" class="btn primary xl" data-v="tutup" style="grid-column:1/-1"><i data-lucide="scan-line"></i> OK · Scan berikutnya</button>'
+        : '<button type="button" class="btn danger xl" data-v="salah"><i data-lucide="x"></i> SALAH</button>' +
+          '<button type="button" class="btn ' + (aksi === 'selesai' ? 'gold' : 'success') + ' xl" data-v="benar"><i data-lucide="check"></i> BENAR' +
+            (aksi === 'selesai' ? ' · Hadiah' : '') + '</button>') +
+      '</div>';
+    document.body.appendChild(v);
+    App.icons();
+    if (th && S.online) App.api('getFotoJamaah', id).then(function (full) {
+      var im = v.querySelector('[data-pfoto] img'); if (im && full) im.src = full;
+    }).catch(function () {});
+
+    function done() {
+      v.remove(); S.sheetOpen = false;
+      S.lastClosed = { id: id, t: Date.now() };
+      S.pausedUntil = Date.now() + 1200;            // jeda singkat agar kartu yang sama tidak langsung terbaca lagi
+      try { if (S.cam && S.camRunning) S.cam.resume(); } catch (e) {}
+      focusCatcher();
+    }
+    v.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-v]'); if (!b) return;
+      done();
+      if (b.dataset.v === 'tutup') { resetResult(); return; }
+      if (b.dataset.v === 'salah') {
+        showResult('err', 'Dibatalkan', 'Data tidak sesuai — silakan scan ulang', null);
+        return;
+      }
+      if (aksi === 'selesai') commitSelesai(id, metode); else commitHadir(id, 'Hadir', metode);
+    });
+  }
+
+  /** Ganti mode HADIR / SELESAI (diingat di HP). */
+  function setMode(m) {
+    S.mode = m === 'selesai' ? 'selesai' : 'hadir';
+    App.store.set('ptg_mode', S.mode);
+    App.$$('[data-mode]').forEach(function (b) { b.classList.toggle('on', b.dataset.mode === S.mode); });
+    $('#scrScan').classList.toggle('mode-selesai', S.mode === 'selesai');
+    resetResult(); updateCounter();
+  }
+
+  var resultTimer;
+  function showResult(kind, title, sub, idJamaah) {
+    var el = $('#scanResult');
+    el.className = 'scan-result ' + kind;
+    var text = '<div class="sr-name">' + App.esc(title) + '</div>' + (sub ? '<div class="sr-status">' + App.esc(sub) + '</div>' : '');
+    // Foto + data singkat jamaah di hasil scan → petugas bisa memastikan orangnya sesuai kartu.
+    // Ketuk banner untuk melihat profil lengkap & foto besar.
+    var j = idJamaah ? S.jamaah[idJamaah] : null;
+    var info = '';
+    if (j) {
+      var u = '';
+      var m = String(j.tanggal_lahir || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) { var n = new Date(); u = n.getFullYear() - +m[1] - ((n.getMonth() + 1 < +m[2] || (n.getMonth() + 1 === +m[2] && n.getDate() < +m[3])) ? 1 : 0); }
+      info = [j.jk === 'L' ? 'Ikhwan' : j.jk === 'P' ? 'Akhwat' : '', u !== '' && u >= 0 ? u + ' th' : '',
+              (j.desa || '') + (j.rt ? ' RT ' + j.rt + (j.rw ? '/' + j.rw : '') : ''), j.fasilitator ? 'Fas. ' + j.fasilitator : '']
+        .filter(String).join(' · ');
+    }
+    el.innerHTML = idJamaah
+      ? '<div class="sr-row" data-sr-profil="' + App.esc(idJamaah) + '">' + App.avatar((S.thumbs || {})[idJamaah], title, 72) +
+          '<div style="min-width:0;flex:1">' + text + (info ? '<div class="sr-info">' + App.esc(info) + '</div>' : '') + '</div>' +
+          '<span class="sr-more" aria-hidden="true">›</span></div>'
+      : text;
+    void el.offsetWidth; el.classList.add('pop');
+    feedbackSound(kind);
+    clearTimeout(resultTimer);
+    resultTimer = setTimeout(resetResult, kind === 'ok' ? 2500 : 3500);
+  }
+  function resetResult() {
+    var el = $('#scanResult');
+    el.className = 'scan-result';
+    el.innerHTML = S.mode === 'selesai'
+      ? '<div class="sr-idle">🎁 Mode SELESAI — scan kartu jamaah yang pulang untuk hadiah</div>'
+      : '<div class="sr-idle">Arahkan QR / barcode kartu ke dalam kotak</div>';
+  }
+
+  function counts() {
+    var hadir = 0, selesai = 0;
+    Object.keys(S.records).forEach(function (id) {
+      var r = S.records[id];
+      if (r.status === 'Hadir') { hadir++; if (r.selesai) selesai++; }
+    });
+    return { hadir: hadir, selesai: selesai, total: S.pesertaN };
+  }
+  function updateCounter() {
+    var c = counts();
+    var lbl = document.querySelector('#cntNum + .lbl') || document.querySelector('.counter .lbl');
+    if (S.mode === 'selesai') {
+      $('#cntNum').innerHTML = c.selesai + '<small>/' + c.hadir + '</small>';
+      if (lbl) lbl.textContent = 'Selesai · dari yang hadir';
+      $('#cntBar').style.width = (c.hadir ? Math.min(100, c.selesai / c.hadir * 100) : 0) + '%';
+    } else {
+      $('#cntNum').innerHTML = c.hadir + '<small>/' + c.total + '</small>';
+      if (lbl) lbl.textContent = 'Hadir' + (c.selesai ? ' · ' + c.selesai + ' selesai' : '');
+      $('#cntBar').style.width = (c.total ? Math.min(100, c.hadir / c.total * 100) : 0) + '%';
+    }
+  }
+  App.$$('[data-mode]').forEach(function (b) { b.addEventListener('click', function () { setMode(b.dataset.mode); }); });
+  // Ketuk banner hasil scan → profil lengkap + foto besar (scan otomatis dijeda selama profil terbuka).
+  $('#scanResult').addEventListener('click', function (e) {
+    var row = e.target.closest('[data-sr-profil]'); if (!row) return;
+    clearTimeout(resultTimer);
+    openManual(row.dataset.srProfil);
+  });
+
+  /* =========================================================
+   * Kamera (html5-qrcode, CODE_128)
+   * ========================================================= */
+  function camMsg(text) {
+    $('#camMsg').hidden = !text;
+    if (text) $('#camMsgText').textContent = text;
+  }
+
+  function startCamera() {
+    if (S.camRunning || S.camStarting || S.screen !== 'scan' || document.hidden) return;
+    S.camStarting = true;
+    camMsg('');
+    App.loadScript(QR_URL).then(function () {
+      if (!S.cam) {
+        S.cam = new Html5Qrcode('reader', {
+          verbose: false,
+          // Kartu jamaah memakai QR code; CODE_128 tetap didukung untuk kartu barcode.
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128],
+          useBarCodeDetectorIfSupported: true,
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+        });
+      }
+      return S.cam.start({ facingMode: S.facing }, { fps: 12, disableFlip: true }, onDecode, function () {});
+    }).then(function () {
+      S.camRunning = true; S.camStarting = false;
+      if (S.screen !== 'scan') { stopCamera(); return; }
+      setupTorch();
+    }).catch(function (err) {
+      S.camStarting = false;
+      var m = String(err && (err.message || err.name) || err);
+      var text = /NotAllowed|Permission|denied/i.test(m) ? 'Izin kamera ditolak. Izinkan kamera di pengaturan browser, atau gunakan scanner / Input Manual.'
+        : /NotFound|Requested device not found|no camera/i.test(m) ? 'Kamera tidak ditemukan. Gunakan scanner barcode atau Input Manual.'
+        : /secure|https|insecure/i.test(m) ? 'Kamera butuh koneksi HTTPS.'
+        : /pustaka|library|memuat/i.test(m) ? 'Gagal memuat pemindai (cek internet). Scanner & Input Manual tetap bisa dipakai.'
+        : 'Kamera tidak bisa dibuka di halaman ini. Gunakan scanner barcode atau Input Manual.';
+      camMsg(text);
+      console.warn('Kamera gagal:', m);
+    });
+  }
+
+  function stopCamera() {
+    if (!S.cam || !S.camRunning) return;
+    S.camRunning = false;
+    S.torch = null; S.torchOn = false;
+    $('#btnTorch').hidden = true; $('#btnTorch').classList.remove('on');
+    S.cam.stop().catch(function () {});
+  }
+
+  function setupTorch() {
+    S.torch = null;
+    try {
+      var caps = S.cam.getRunningTrackCameraCapabilities();
+      var tf = caps && caps.torchFeature && caps.torchFeature();
+      if (tf && tf.isSupported()) S.torch = tf;
+    } catch (e) {}
+    $('#btnTorch').hidden = !S.torch;
+  }
+
+  function onDecode(text) {
+    var now = Date.now();
+    if (now < S.pausedUntil || S.sheetOpen || S.screen !== 'scan') return;
+    S.pausedUntil = now + COOLDOWN;
+    record(text, 'Hadir', 'Scan Kamera');
+  }
+
+  $('#btnTorch').addEventListener('click', function () {
+    if (!S.torch) return;
+    var want = !S.torchOn;
+    S.torch.apply(want).then(function () {
+      S.torchOn = want; $('#btnTorch').classList.toggle('on', want);
+    }).catch(function () { App.toast('Senter tidak didukung di HP ini.', 'warn'); });
+  });
+  $('#btnSwitch').addEventListener('click', function () {
+    S.facing = S.facing === 'environment' ? 'user' : 'environment';
+    if (!S.cam || !S.camRunning) { startCamera(); return; }
+    S.camRunning = false;
+    S.cam.stop().catch(function () {}).then(function () { startCamera(); });
+  });
+  $('#camRetry').addEventListener('click', startCamera);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stopCamera(); else if (S.screen === 'scan') startCamera();
+  });
+
+  /* =========================================================
+   * Scanner USB / Bluetooth (mode keyboard): ketik cepat + Enter
+   * ========================================================= */
+  function focusCatcher() {
+    if (S.screen === 'scan' && !S.sheetOpen) { try { $('#kbdCatcher').focus({ preventScroll: true }); } catch (e) {} }
+  }
+  document.addEventListener('keydown', function (e) {
+    if (S.screen !== 'scan' || S.sheetOpen || $('#ptgApp').hidden) return;
+    var t = e.target;
+    if (t && t !== $('#kbdCatcher') && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (S.kbuf.length >= 4) { e.preventDefault(); var code = S.kbuf; S.kbuf = ''; record(code, 'Hadir', 'Scanner'); }
+      S.kbuf = '';
+      $('#kbdCatcher').value = '';
+      return;
+    }
+    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      S.kbuf += e.key;
+      clearTimeout(S.ktimer);
+      S.ktimer = setTimeout(function () { S.kbuf = ''; $('#kbdCatcher').value = ''; }, 800);
+    }
+  });
+  $('#scrScan').addEventListener('click', function (e) {
+    if (!e.target.closest('button, input')) focusCatcher();
+  });
+
+  /* =========================================================
+   * Input manual
+   * ========================================================= */
+  /** Profil lengkap jamaah (semua kolom DATA MASTER JAMAAH) untuk dicek petugas sebelum mencatat. */
+  function profilHtml(j) {
+    function usia(t) {
+      var m = String(t || '').match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return '';
+      var n = new Date(), u = n.getFullYear() - +m[1] - ((n.getMonth() + 1 < +m[2] || (n.getMonth() + 1 === +m[2] && n.getDate() < +m[3])) ? 1 : 0);
+      return u >= 0 && u < 130 ? u + ' th' : '';
+    }
+    function row(label, val, full) {
+      return '<div class="pf-item' + (full ? ' full' : '') + '"><span>' + label + '</span><b>' + (val ? val : '<i class="dim">–</i>') + '</b></div>';
+    }
+    var esc = App.esc;
+    var jkTxt = j.jk === 'L' ? 'Ikhwan' : j.jk === 'P' ? 'Akhwat' : '';
+    var lahir = j.tanggal_lahir ? esc(App.tgl(j.tanggal_lahir)) + (usia(j.tanggal_lahir) ? ' · ' + usia(j.tanggal_lahir) : '') : '';
+    var wa = j.no_hp ? j.no_hp.replace(/^0/, '62').replace(/\D/g, '') : '';
+    var hp = j.no_hp ? esc(j.no_hp) + ' <a class="pf-link" href="tel:' + esc(j.no_hp) + '" target="_top">Telepon</a>' +
+                       ' <a class="pf-link" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">WhatsApp</a>' : '';
+    var rtrw = (j.rt ? 'RT ' + j.rt : '') + (j.rw ? (j.rt ? ' / ' : '') + 'RW ' + j.rw : '');
+    var wilayah = [j.desa, rtrw, j.kecamatan, j.kota, j.provinsi].filter(String).map(esc).join(', ');
+    return '<div class="pf-grid">' +
+      row('Nama panggilan', esc(j.panggilan)) + row('Jenis kelamin', jkTxt) +
+      row('Tanggal lahir · usia', lahir) + row('Pekerjaan', esc(j.pekerjaan)) +
+      row('No HP', hp, true) +
+      row('Alamat asli', esc(j.alamat), true) +
+      row('Desa · wilayah', wilayah, true) +
+      row('Kartu keluarga', esc(j.no_kk)) + row('Fasilitator', esc(j.fasilitator)) +
+      row('Terdaftar sejak', j.tanggal_daftar ? esc(App.tgl(j.tanggal_daftar)) : '') + row('Peserta program', S.peserta[j.id] ? 'Ya' : 'Bukan peserta') +
+      (j.catatan ? row('Catatan', esc(j.catatan), true) : '') +
+      '</div>';
+  }
+
+
+  function openManual(preselectId) {
+    S.sheetOpen = true;
+    var sh = document.createElement('div');
+    sh.className = 'sheet';
+    sh.innerHTML =
+      '<div class="sheet-head">' +
+        '<button class="round" data-x aria-label="Tutup"><i data-lucide="x"></i></button>' +
+        '<div class="input-wrap grow"><i data-lucide="search"></i><input class="input" data-q type="search" placeholder="Ketik nama (min. 2 huruf)…" autocomplete="off" autocapitalize="words"></div>' +
+      '</div>' +
+      '<div class="sheet-body" data-body><p class="muted" style="text-align:center;margin-top:24px">Ketik minimal 2 huruf nama jamaah.</p></div>';
+    document.body.appendChild(sh);
+    App.icons();
+    var q = sh.querySelector('[data-q]'), body = sh.querySelector('[data-body]');
+
+    function close() { sh.remove(); S.sheetOpen = false; focusCatcher(); }
+    function search() {
+      var term = App.norm(q.value);
+      if (term.length < 2) { body.innerHTML = '<p class="muted" style="text-align:center;margin-top:24px">Ketik minimal 2 huruf nama jamaah.</p>'; return; }
+      var res = Object.keys(S.jamaah).map(function (id) { return S.jamaah[id]; }).filter(function (j) {
+        return App.norm(j.nama).indexOf(term) !== -1 || App.norm(j.panggilan).indexOf(term) !== -1 || j.id.toLowerCase().indexOf(term) !== -1;
+      }).sort(function (a, b) {
+        var pa = S.peserta[a.id] ? 0 : 1, pb = S.peserta[b.id] ? 0 : 1;
+        var sa = App.norm(a.nama).indexOf(term) === 0 ? 0 : 1, sb = App.norm(b.nama).indexOf(term) === 0 ? 0 : 1;
+        return pa - pb || sa - sb || a.nama.localeCompare(b.nama, 'id');
+      }).slice(0, 30);
+      body.innerHTML = res.length ? res.map(function (j) {
+        var r = S.records[j.id];
+        return '<button class="ac-item" data-pick="' + App.esc(j.id) + '">' + App.avatar((S.thumbs || {})[j.id], j.nama, 44) + '<div class="grow"><b>' + App.esc(j.nama) + '</b><small>' +
+          App.esc(j.kelompok || '-') + (S.peserta[j.id] ? '' : ' · bukan peserta') + '</small></div>' +
+          (r ? App.statusBadge(r.status) : '<i data-lucide="chevron-right"></i>') + '</button>';
+      }).join('') : '<div style="text-align:center;margin-top:24px"><p class="muted">Nama tidak ditemukan.</p>' +
+        '<button class="btn primary lg" data-daftar><i data-lucide="user-plus"></i> Daftarkan sebagai jamaah baru</button></div>';
+      App.icons();
+    }
+    function pick(id) {
+      var j = S.jamaah[id], r = S.records[id];
+      body.innerHTML =
+        '<div class="glass card picked"><div data-pfoto style="margin-bottom:10px">' + ((S.thumbs || {})[j.id] ? '<img class="foto-big" style="max-width:150px" src="' + App.esc(S.thumbs[j.id]) + '" alt="">' : App.avatar('', j.nama, 84)) + '</div><div class="dim mono">' + App.esc(j.id) + '</div><div class="nm">' + App.esc(j.nama) + '</div>' +
+        '<div class="muted">' + App.esc(j.desa || '') + '</div>' +
+        (r ? '<p style="margin-top:12px">' + App.statusBadge(r.status) + ' tercatat jam ' + App.esc(App.jam(r.waktu)) +
+          (r.selesai ? ' · selesai jam ' + App.esc(App.jam(r.selesai)) + ' 🎁' : '') + '</p>' : '') +
+        profilHtml(j) + '</div>' +
+        (r ? ((r.status === 'Hadir' && !r.selesai)
+              ? '<button class="btn gold xl block" data-selesai style="margin-top:16px"><i data-lucide="gift"></i> SELESAI &amp; Berikan Hadiah</button>'
+              : (r.selesai ? '<p class="muted" style="text-align:center;margin:14px 0 0">Hadiah sudah diberikan saat selesai jam ' + App.esc(App.jam(r.selesai)) + '.</p>' : '')) +
+            '<button class="btn block lg" data-back style="margin-top:12px"><i data-lucide="arrow-left"></i> Cari nama lain</button>' :
+        '<div class="status-grid">' +
+          '<button class="btn success" data-st="Hadir"><i data-lucide="check"></i> Hadir</button>' +
+          '<button class="btn izin" data-st="Izin"><i data-lucide="mail"></i> Izin</button>' +
+          '<button class="btn warn" data-st="Sakit"><i data-lucide="thermometer"></i> Sakit</button>' +
+          '<button class="btn danger" data-st="Alpa"><i data-lucide="x"></i> Alpa</button>' +
+        '</div><button class="btn ghost block lg" data-back style="margin-top:12px">Batal</button>');
+      body.dataset.id = id;
+      if ((S.thumbs || {})[id] && S.online) App.api('getFotoJamaah', id).then(function (full) {   // foto besar (bila online)
+        var im = body.querySelector('[data-pfoto] img'); if (im && full && body.dataset.id === id) im.src = full;
+      }).catch(function () {});
+      App.icons();
+    }
+
+    q.addEventListener('input', search);
+    sh.addEventListener('click', function (e) {
+      if (e.target.closest('[data-x]')) return close();
+      if (e.target.closest('[data-daftar]')) { var nm0 = q.value.trim(); close(); return openDaftar(nm0); }
+      var p = e.target.closest('[data-pick]'); if (p) return pick(p.dataset.pick);
+      if (e.target.closest('[data-back]')) { search(); q.focus(); return; }
+      if (e.target.closest('[data-selesai]')) {
+        var sid = body.dataset.id, snm = S.jamaah[sid].nama;
+        return App.confirm('Catat SELESAI?', snm + ' dicatat selesai mengikuti program dan menerima hadiah.').then(function (yes) {
+          if (!yes) return;
+          close(); recordSelesai(sid, 'Manual');
+          if (S.screen === 'list') renderList();
+        });
+      }
+      var st = e.target.closest('[data-st]');
+      if (st) {
+        var id = body.dataset.id, nm = S.jamaah[id].nama, status = st.dataset.st;
+        App.confirm('Catat ' + status.toUpperCase() + '?', nm + ' akan dicatat ' + status + ' di sesi ini.', '', status === 'Alpa').then(function (yes) {
+          if (!yes) return;                       // Tidak → tetap di layar pilih status
+          close();
+          record(id, status, 'Manual');
+          if (S.screen === 'list') renderList();
+          App.toast(nm + ' → ' + status, 'ok', 2000);
+        });
+      }
+    });
+    // Fokus langsung (masih di dalam event ketuk) agar keyboard HP — termasuk iPhone — ikut muncul.
+    if (preselectId) pick(preselectId); else q.focus();
+  }
+  $('#btnManual').addEventListener('click', function () { openManual(); });
+  $('#btnDaftar').addEventListener('click', function () { openDaftar(''); });
+
+  /* =========================================================
+   * Formulir pendaftaran jamaah baru — desain profesional aplikasi.
+   * Urutan: DATA WAJIB dulu (nama, jenis kelamin), lalu bagian OPSIONAL yang bisa dilipat.
+   * Hanya untuk petugas yang sedang bertugas (sesi hari ini dibuka) — dicek juga di server.
+   * ========================================================= */
+  function openDaftar(prefillNama) {
+    if (!S.sesi || S.sesi.status !== 'Dibuka' || S.sesi.tanggal !== App.today()) {
+      App.toast('Pendaftaran jamaah hanya bisa saat bertugas (sesi hari ini sedang dibuka).', 'warn', 4000); return;
+    }
+    if (!S.online || !navigator.onLine) { App.toast('Pendaftaran jamaah baru butuh koneksi internet.', 'warn', 4000); return; }
+    var meta = S.formMeta || { fasilitator: [], desa: [], pekerjaan: [], defaults: {} };
+    var d = meta.defaults || {};
+    var esc = App.esc;
+
+    function inp(name, label, attr, val, ph) {
+      return '<label class="df-field"><span>' + label + '</span><input class="df-input" name="' + name + '"' + (attr || '') +
+        (val ? ' value="' + esc(val) + '"' : '') + ' placeholder="' + esc(ph || '') + '"></label>';
+    }
+    function section(key, icon, title, body, open) {
+      return '<details class="df-sec" data-sec="' + key + '"' + (open ? ' open' : '') + '><summary>' +
+        '<span class="df-sec-ic"><i data-lucide="' + icon + '"></i></span><span class="df-sec-t">' + title +
+        '<small data-count>Opsional</small></span><i data-lucide="chevron-down" class="df-chev"></i></summary>' +
+        '<div class="df-sec-body">' + body + '</div></details>';
+    }
+    function list(id, arr) { return '<datalist id="' + id + '">' + (arr || []).map(function (v) { return '<option value="' + esc(v) + '">'; }).join('') + '</datalist>'; }
+
+    var g = document.createElement('div');
+    g.className = 'dform';
+    g.innerHTML =
+      '<header class="df-head">' +
+        '<button type="button" class="df-x" data-gx aria-label="Tutup"><i data-lucide="x"></i></button>' +
+        '<div class="df-head-t"><b>Daftar Jamaah Baru</b><span>' + esc(S.program.nama_program) + ' · ' + esc(App.tgl(S.sesi.tanggal, true)) + '</span></div>' +
+      '</header>' +
+      '<form class="df-wrap" novalidate>' +
+        // ---------- WAJIB ----------
+        '<section class="df-card df-req">' +
+          '<div class="df-card-h"><span class="df-badge">Wajib diisi</span><small>No Jamaah dibuat otomatis</small></div>' +
+          '<label class="df-field" data-f="nama"><span>Nama Lengkap <em>*</em></span>' +
+            '<input class="df-input df-lg" name="nama" autocapitalize="words" maxlength="100" placeholder="Nama sesuai identitas"' + (prefillNama ? ' value="' + esc(prefillNama) + '"' : '') + '>' +
+            '<small class="df-err">Nama lengkap wajib diisi</small></label>' +
+          '<div class="df-field" data-f="jenis_kelamin"><span>Jenis Kelamin <em>*</em></span>' +
+            '<div class="df-seg">' +
+              '<label><input type="radio" name="jenis_kelamin" value="L"><b><i data-lucide="user"></i> Ikhwan</b></label>' +
+              '<label><input type="radio" name="jenis_kelamin" value="P"><b><i data-lucide="user-round"></i> Akhwat</b></label>' +
+            '</div><small class="df-err">Pilih jenis kelamin</small></div>' +
+        '</section>' +
+        // ---------- OPSIONAL ----------
+        '<div class="df-opt-title">Data tambahan <span>opsional — bisa dilengkapi admin nanti</span></div>' +
+        section('foto', 'camera', 'Foto Jamaah',
+          '<div class="df-foto"><span data-gfprev>' + App.avatar('', '+', 76) + '</span><div class="df-foto-btn">' +
+            '<label class="df-btn"><i data-lucide="camera"></i> Ambil foto<input type="file" accept="image/*" capture="user" data-gffile hidden></label>' +
+            '<label class="df-btn"><i data-lucide="image-up"></i> Dari galeri<input type="file" accept="image/*" data-gffile hidden></label>' +
+            '<small data-gfinfo>Otomatis dikecilkan ke WebP.</small></div></div>') +
+        section('diri', 'id-card', 'Data Diri',
+          inp('nama_panggilan', 'Nama Panggilan', ' autocapitalize="words"') +
+          '<div class="df-grid">' + inp('tanggal_lahir', 'Tanggal Lahir', ' type="date"') +
+          inp('pekerjaan', 'Pekerjaan', ' list="gfPekerjaan"', '', 'mis. Pelajar') + '</div>') +
+        section('alamat', 'map-pin', 'Kontak & Alamat',
+          '<label class="df-field" data-f="no_hp"><span>No HP / WhatsApp</span><input class="df-input" name="no_hp" type="tel" inputmode="tel" placeholder="08xxxxxxxxxx">' +
+            '<small class="df-err">Format no HP tidak valid (mis. 081234567890)</small></label>' +
+          inp('desa', 'Desa / Kampung', ' list="gfDesa"', d.desa) +
+          '<div class="df-grid">' + inp('rt', 'RT', ' inputmode="numeric"') + inp('rw', 'RW', ' inputmode="numeric"') + '</div>' +
+          '<div class="df-grid">' + inp('kecamatan', 'Kecamatan', '', d.kecamatan) + inp('kota', 'Kota / Kabupaten', '', d.kota) + '</div>' +
+          inp('provinsi', 'Provinsi', '', d.provinsi) +
+          '<label class="df-field"><span>Alamat Asli</span><textarea class="df-input" name="alamat" rows="2"></textarea></label>') +
+        section('lain', 'clipboard-list', 'Lainnya',
+          inp('no_kk', 'Nomor Kartu Keluarga', ' inputmode="numeric" maxlength="20"', '', '16 digit') +
+          (meta.fasilitator && meta.fasilitator.length ? '<label class="df-field"><span>Fasilitator</span><select class="df-input" name="kelompok"><option value="">— Tidak ada —</option>' +
+            meta.fasilitator.map(function (f) { return '<option>' + esc(f) + '</option>'; }).join('') + '</select></label>' : '') +
+          '<label class="df-field"><span>Catatan</span><textarea class="df-input" name="catatan" rows="2"></textarea></label>') +
+        '<div class="df-error" data-gerr hidden></div>' +
+        '<div class="df-spacer"></div>' +
+        // ---------- aksi (menempel di bawah) ----------
+        '<div class="df-bar">' +
+          '<label class="df-hadir"><input type="checkbox" name="hadir" checked><span>Langsung catat <b>HADIR</b> hari ini</span></label>' +
+          '<button type="submit" class="df-submit"><i data-lucide="user-plus"></i> Simpan Pendaftaran</button>' +
+        '</div>' +
+      '</form>' + list('gfDesa', meta.desa) + list('gfPekerjaan', meta.pekerjaan);
+    document.body.appendChild(g);
+    S.sheetOpen = true;
+    App.icons();
+    var form = g.querySelector('form');
+    var fotoBaru = null;
+
+    // jumlah isian terisi per bagian opsional
+    function updateCounts() {
+      App.$$('[data-sec]', g).forEach(function (sec) {
+        var n = sec.dataset.sec === 'foto' ? (fotoBaru ? 1 : 0)
+          : App.$$('input:not([type=file]), textarea, select', sec).filter(function (x) { return String(x.value).trim(); }).length;
+        var c = sec.querySelector('[data-count]');
+        c.textContent = n ? n + ' terisi' : 'Opsional';
+        c.classList.toggle('on', !!n);
+      });
+    }
+    updateCounts();
+
+    App.$$('[data-gffile]', g).forEach(function (fi) {
+      fi.addEventListener('change', function () {
+        var f = fi.files[0]; fi.value = ''; if (!f) return;
+        App.fotoKeWebp(f).then(function (r) {
+          fotoBaru = r;
+          g.querySelector('[data-gfprev]').innerHTML = '<img class="ava" style="width:76px;height:76px" src="' + r.foto + '" alt="">';
+          g.querySelector('[data-gfinfo]').textContent = 'Foto siap · WebP ' + Math.round(r.foto.length * 0.75 / 1024) + ' KB';
+          updateCounts();
+        }).catch(function (e) { App.toast(e.message, 'err', 5000); });
+      });
+    });
+
+    function close() { g.remove(); S.sheetOpen = false; focusCatcher(); }
+    function mark(name, bad) { var el = g.querySelector('[data-f="' + name + '"]'); if (el) el.classList.toggle('df-invalid', bad); return bad; }
+    function validate() {
+      var bad = false;
+      bad = mark('nama', !form.nama.value.trim()) || bad;
+      bad = mark('jenis_kelamin', !form.querySelector('[name=jenis_kelamin]:checked')) || bad;
+      var hp = form.no_hp.value.replace(/[\s\-().]/g, '');
+      var hpBad = !!hp && !/^(\+62|62|0)?8\d{7,12}$/.test(hp);
+      if (mark('no_hp', hpBad)) { g.querySelector('[data-sec="alamat"]').open = true; bad = true; }
+      if (bad) { var first = g.querySelector('.df-invalid'); if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      return !bad;
+    }
+
+    g.addEventListener('click', function (e) {
+      if (e.target.closest('[data-gx]')) {
+        App.confirm('Tutup formulir?', 'Isian yang belum disimpan akan hilang.').then(function (y) { if (y) close(); });
+      }
+      if (e.target.closest('[data-gagain]')) { close(); openDaftar(''); }
+      if (e.target.closest('[data-gdone]')) close();
+    });
+    form.addEventListener('input', function (e) { var f = e.target.closest('[data-f]'); if (f) f.classList.remove('df-invalid'); updateCounts(); });
+    form.addEventListener('change', function (e) { var f = e.target.closest('[data-f]'); if (f) f.classList.remove('df-invalid'); updateCounts(); });
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      g.querySelector('[data-gerr]').hidden = true;
+      if (!validate()) return;
+      var v = App.formValues(form);
+      var data = { nama: v.nama, nama_panggilan: v.nama_panggilan, jenis_kelamin: v.jenis_kelamin, tanggal_lahir: v.tanggal_lahir,
+        pekerjaan: v.pekerjaan, no_hp: v.no_hp, desa: v.desa, rt: v.rt, rw: v.rw, kecamatan: v.kecamatan, kota: v.kota,
+        provinsi: v.provinsi, no_kk: v.no_kk, alamat: v.alamat, kelompok: v.kelompok || '', catatan: v.catatan };
+      App.confirm('Simpan pendaftaran?', v.nama + ' akan didaftarkan sebagai jamaah baru' + (v.hadir ? ' dan langsung dicatat HADIR.' : '.')).then(function (yes) {
+        if (!yes) return;
+        var btn = form.querySelector('.df-submit');
+        App.busy(btn, App.api('daftarJamaahPetugas', S.sesiId, data, !!v.hadir).then(function (res) {
+          if (!fotoBaru) return res;
+          return App.api('simpanFotoJamaah', res.jamaah[0], fotoBaru.foto, fotoBaru.thumb, S.sesiId)
+            .then(function () { S.thumbs = S.thumbs || {}; S.thumbs[res.jamaah[0]] = fotoBaru.thumb; return res; })
+            .catch(function (er) { App.toast('Data tersimpan, tapi foto gagal diunggah: ' + er.message, 'warn', 5000); return res; });
+        })).then(function (res) {
+          var j = res.jamaah;
+          S.jamaahRaw = (S.jamaahRaw || []).concat([j]);
+          applySesiData({ sesi: S.sesi, program: S.program, jamaah: S.jamaahRaw, peserta: Object.keys(S.peserta).concat(res.peserta ? [j[0]] : []) });
+          if (res.hadir) S.records[j[0]] = res.hadir;
+          saveSesiCache(); updateCounter();
+          if (S.screen === 'list') renderList();
+          feedbackSound('ok');
+          form.outerHTML =
+            '<div class="df-wrap"><section class="df-card df-done">' +
+              '<div class="df-done-ic"><i data-lucide="check"></i></div>' +
+              '<h2>Jamaah berhasil didaftarkan</h2>' +
+              '<div class="df-done-id">' + App.avatar((S.thumbs || {})[j[0]], j[1], 64) +
+                '<div><span>No Jamaah</span><b>' + esc(j[0]) + '</b><small>' + esc(j[1]) + (res.hadir ? ' · tercatat HADIR' : '') + '</small></div></div>' +
+              '<p>Kartu QR jamaah dapat dicetak admin di menu Kartu Jamaah.</p>' +
+              '<div class="df-done-act"><button type="button" class="df-submit" data-gdone><i data-lucide="scan-barcode"></i> Kembali ke Scan</button>' +
+              '<button type="button" class="df-btn" data-gagain><i data-lucide="user-plus"></i> Daftarkan lagi</button></div>' +
+            '</section></div>';
+          App.icons();
+          App.toast(j[1] + ' terdaftar (' + j[0] + ')', 'ok', 3000);
+        }).catch(function (err) {
+          var box = g.querySelector('[data-gerr]'); box.textContent = err.message; box.hidden = false;
+          box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      });
+    });
+    if (!prefillNama) setTimeout(function () { form.nama.focus(); }, 50);
+  }
+
+  /* =========================================================
+   * Daftar kehadiran
+   * ========================================================= */
+  function renderList() {
+    if (!S.sesiId) return;
+    var hadir = [], belum = [];
+    Object.keys(S.records).forEach(function (id) {
+      var r = S.records[id];
+      if (r.status === 'Hadir') hadir.push({ id: id, r: r });
+    });
+    hadir.sort(function (a, b) { return b.r.waktu.localeCompare(a.r.waktu); });
+    Object.keys(S.peserta).forEach(function (id) {
+      var r = S.records[id];
+      if (!r || r.status !== 'Hadir') belum.push({ id: id, r: r });
+    });
+    belum.sort(function (a, b) { return (S.jamaah[a.id] ? S.jamaah[a.id].nama : a.id).localeCompare(S.jamaah[b.id] ? S.jamaah[b.id].nama : b.id, 'id'); });
+    var selesai = hadir.filter(function (x) { return x.r.selesai; })
+      .sort(function (a, b) { return String(b.r.selesai).localeCompare(String(a.r.selesai)); });
+    $('#tabHadirN').textContent = hadir.length;
+    $('#tabBelumN').textContent = belum.length;
+    $('#tabSelesaiN').textContent = selesai.length;
+    App.$$('[data-ltab]').forEach(function (b) { b.classList.toggle('active', b.dataset.ltab === S.listTab); });
+    var list = S.listTab === 'hadir' ? hadir : S.listTab === 'selesai' ? selesai : belum;
+    $('#attList').innerHTML = list.length ? list.map(function (x) {
+      var j = S.jamaah[x.id] || { nama: x.id, kelompok: '' };
+      // jam datang → jam selesai (🎁 = hadiah sudah diberikan)
+      var right = x.r ? (x.r.status === 'Hadir'
+          ? '<div class="at">' + App.esc(App.jam(x.r.waktu)) + (x.r.selesai ? '<span class="at-sel">→ ' + App.esc(App.jam(x.r.selesai)) + ' 🎁</span>' : '') + '</div>'
+          : App.statusBadge(x.r.status))
+        : '<button class="btn sm" data-mark="' + App.esc(x.id) + '">Tandai</button>';
+      return '<div class="att-row' + (x.r && x.r.pending ? ' pending' : '') + '">' + App.avatar((S.thumbs || {})[x.id], j.nama, 40) + '<div class="an"><b>' + App.esc(j.nama) + '</b><small>' +
+        App.esc(j.kelompok || '') + (x.r ? ' · ' + App.esc(x.r.metode || '') : '') + (x.r && x.r.pending ? ' · menunggu kirim' : '') +
+        (S.peserta[x.id] ? '' : ' · bukan peserta') + '</small></div>' + right + '</div>';
+    }).join('') : '<div class="glass card empty">' + (S.listTab === 'hadir' ? 'Belum ada yang hadir.' : S.listTab === 'selesai' ? 'Belum ada yang absen SELESAI.' : 'Semua peserta sudah hadir 🎉') + '</div>';
+  }
+  App.$$('[data-ltab]').forEach(function (b) {
+    b.addEventListener('click', function () { S.listTab = b.dataset.ltab; renderList(); });
+  });
+  $('#attList').addEventListener('click', function (e) {
+    var m = e.target.closest('[data-mark]'); if (m) openManual(m.dataset.mark);
+  });
+
+  $('#btnTutup').addEventListener('click', function () {
+    var c = counts();
+    var belum = Object.keys(S.peserta).filter(function (id) { return !S.records[id]; }).length;
+    App.confirm('Tutup sesi?', 'Hadir ' + c.hadir + ' dari ' + c.total + ' peserta. ' + belum + ' peserta yang belum tercatat akan ditandai ALPA. Setelah ditutup, sesi tidak bisa di-scan lagi.', 'Tutup Sesi', true)
+      .then(function (ok) {
+        if (!ok) return;
+        App.loading(true);
+        flush().then(function () {
+          var left = queue().filter(function (q) { return q.id_sesi === S.sesiId; }).length;
+          if (left) throw new Error('Masih ada ' + left + ' data belum terkirim. Pastikan internet tersambung lalu coba lagi.');
+          return App.api('tutupSesi', S.sesiId);
+        }).then(function (res) {
+          App.toast('Sesi ditutup. ' + res.alpa + ' peserta ditandai Alpa.', 'ok', 4000);
+          App.store.del(K_SESI + S.sesiId);
+          leaveSesi();
+        }).catch(function (e2) { App.toast(e2.message, 'err', 5000); })
+          .finally(function () { App.loading(false); });
+      });
+  });
+
+  /* =========================================================
+   * Antrean & sinkronisasi (optimistic UI + offline)
+   * ========================================================= */
+  var flushTimer;
+  function flushSoon() { clearTimeout(flushTimer); flushTimer = setTimeout(flush, 250); }
+
+  function flush() {
+    if (S.flushing) return S.flushing;
+    var q = queue();
+    if (!q.length) { updateSync(); return Promise.resolve(); }
+    var sesiId = q[0].id_sesi, aksi = q[0].aksi === 'selesai' ? 'selesai' : 'hadir';
+    // Kirim berurutan: kelompok item berurutan dengan sesi & aksi yang sama (HADIR selalu terkirim sebelum SELESAI-nya).
+    var batch = [];
+    for (var i = 0; i < q.length && batch.length < 100; i++) {
+      if (q[i].id_sesi !== sesiId || (q[i].aksi === 'selesai' ? 'selesai' : 'hadir') !== aksi) break;
+      batch.push(q[i]);
+    }
+    S.flushing = App.api(aksi === 'selesai' ? 'catatSelesai' : 'catatAbsensi', sesiId, batch).then(function (results) {
+      S.online = true; S.retryMs = 5000;
+      var done = {};
+      results.forEach(function (r) {
+        done[r.client_id] = true;
+        if (sesiId !== S.sesiId) return;
+        var nm = r.nama || r.id_jamaah, rec = S.records[r.id_jamaah];
+        if (aksi === 'selesai') {
+          if (r.result === 'ok') { if (rec) { rec.pendingSelesai = false; rec.selesai = r.waktu; } }
+          else if (r.result === 'dup') { if (rec) { rec.pendingSelesai = false; rec.selesai = r.waktu; rec.hadiah = 'Ya'; }
+            App.toast(nm + ' ternyata sudah selesai jam ' + App.jam(r.waktu) + ' (petugas lain) — hadiah sudah diberikan.', 'warn', 4500); }
+          else { if (rec) { delete rec.selesai; delete rec.hadiah; delete rec.pendingSelesai; }
+            App.toast('SELESAI ' + nm + ' ditolak: ' + (r.pesan || r.result), 'err', 5000); }
+          return;
+        }
+        if (r.result === 'ok') {
+          if (S.records[r.id_jamaah]) { S.records[r.id_jamaah].pending = false; S.records[r.id_jamaah].waktu = r.waktu; }
+        } else if (r.result === 'dup') {
+          S.records[r.id_jamaah] = { status: r.status, waktu: r.waktu, metode: '' };
+          App.toast(nm + ' ternyata sudah tercatat ' + r.status + ' jam ' + App.jam(r.waktu) + ' (petugas lain).', 'warn', 4000);
+        } else {
+          delete S.records[r.id_jamaah];
+          App.toast('Gagal mencatat ' + nm + ': ' + (r.pesan || r.result), 'err', 5000);
+        }
+      });
+      setQueue(queue().filter(function (x) { return !done[x.client_id]; }));
+      if (sesiId === S.sesiId) { saveSesiCache(); updateCounter(); if (S.screen === 'list') renderList(); }
+    }).catch(function (e) {
+      if (e.network) {
+        S.online = false;
+        clearTimeout(S.retryTimer);
+        S.retryTimer = setTimeout(flush, S.retryMs);
+        S.retryMs = Math.min(S.retryMs * 2, 60000);
+      } else if (e.code !== 'EXPIRED') {
+        // Error permanen (mis. bukan program petugas ini): buang agar antrean tidak macet.
+        var ids = {}; batch.forEach(function (b) { ids[b.client_id] = true; });
+        setQueue(queue().filter(function (x) { return !ids[x.client_id]; }));
+        App.toast('Data tidak bisa dikirim: ' + e.message, 'err', 6000);
+      }
+    }).then(function () {
+      S.flushing = false;
+      updateSync();
+      if (S.online && queue().length) return flush();
+    });
+    return S.flushing;
+  }
+
+  window.addEventListener('online', function () { S.online = true; S.retryMs = 5000; flush(); });
+  window.addEventListener('offline', function () { S.online = false; updateSync(); });
+
+  function startPolling() {
+    stopPolling();
+    S.pollTimer = setInterval(function () {
+      if (!S.sesiId || document.hidden || S.flushing) return;
+      var id = S.sesiId;
+      App.api('getSesiAbsensi', id).then(function (d) {
+        if (id !== S.sesiId) return;
+        S.online = true;
+        mergeServerRecords(d.records);
+        saveSesiCache(); updateCounter(); updateSync();
+        if (S.screen === 'list') renderList();
+        if (d.status !== 'Dibuka') { App.toast('Sesi ini sudah ditutup.', 'warn', 4000); leaveSesi(); }
+      }).catch(function (e) { if (e.network) { S.online = false; updateSync(); } });
+    }, 15000);
+  }
+  function stopPolling() { clearInterval(S.pollTimer); S.pollTimer = null; }
+
+  /* =========================================================
+   * Navigasi bawah & keluar
+   * ========================================================= */
+  function doLogout() {
+    var n = queue().length;
+    App.confirm('Keluar?', n ? 'Masih ada ' + n + ' data belum terkirim. Data tetap tersimpan di HP ini dan dikirim saat Anda login lagi.' : 'Yakin ingin keluar?', 'Keluar', true)
+      .then(function (ok) {
+        if (!ok) return;
+        stopCamera(); stopPolling();
+        App.store.del(K_CUR);
+        S.sesiId = null;
+        App.logout();
+        if (App.showLogin) App.showLogin();
+      });
+  }
+  $('#ptgNav').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-nav]'); if (!b) return;
+    if (b.dataset.nav === 'logout') doLogout(); else show(b.dataset.nav);
+  });
+  $('#homeLogout').addEventListener('click', doLogout);
+  $('#scanBack').addEventListener('click', function () {
+    if (S.home && S.home.programs.length <= 1) { show('home'); stopPolling(); App.store.del(K_CUR); S.sesiId = null; loadHome(false); return; }
+    leaveSesi();
+  });
+
+  /* Dipanggil index-petugas setelah login / sesi dipulihkan */
+  window.Petugas = {
+    start: function () {
+      cleanupCaches();
+      $('#ptgApp').hidden = false;
+      show('home');
+      updateSync();
+      loadHome(true);
+      flush();
+    },
+    stop: function () {
+      stopCamera(); stopPolling();
+      $('#ptgApp').hidden = true;
+    },
+    // untuk pengujian
+    _state: S, _record: record
+  };
+})();
+</script>

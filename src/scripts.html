@@ -1,0 +1,428 @@
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script>
+/* =====================================================================
+   scripts.html — JS bersama (admin & petugas)
+   ===================================================================== */
+(function () {
+  var TOKEN_KEY = 'absensi_token';
+  var SESSION_KEY = 'absensi_session';
+
+  var App = window.App = {
+    url: document.body.getAttribute('data-app-url') || '',
+    session: null
+  };
+
+  /* ---------- Penyimpanan aman (localStorage bisa diblokir) ---------- */
+  App.store = {
+    get: function (k, def) {
+      try { var v = localStorage.getItem(k); return v === null ? def : JSON.parse(v); }
+      catch (e) { return def; }
+    },
+    set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+    del: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+
+  App.token = function () { return App.store.get(TOKEN_KEY, ''); };
+  App.saveSession = function (s) {
+    App.session = s;
+    App.store.set(TOKEN_KEY, s.token);
+    App.store.set(SESSION_KEY, s);
+  };
+  App.cachedSession = function () { return App.store.get(SESSION_KEY, null); };
+  App.clearSession = function () {
+    App.session = null;
+    App.store.del(TOKEN_KEY);
+    App.store.del(SESSION_KEY);
+  };
+
+  /* ---------- Panggilan server ---------- */
+
+  /** Panggil fungsi server TANPA token (login). Hasil: Promise<data>. */
+  App.call = function (fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      if (!window.google || !google.script || !google.script.run) {
+        if (window.MOCK_SERVER && MOCK_SERVER[fn]) {
+          setTimeout(function () { handle(MOCK_SERVER[fn].apply(null, args)); }, 300);
+          return;
+        }
+        reject(new Error('Tidak terhubung ke server Apps Script.'));
+        return;
+      }
+      function handle(res) {
+        if (res && res.ok) return resolve(res.data);
+        var err = new Error((res && res.error) || 'Terjadi kesalahan.');
+        err.code = res && res.code;
+        if (err.code === 'EXPIRED') App.onExpired(err.message);
+        reject(err);
+      }
+      google.script.run
+        .withSuccessHandler(handle)
+        .withFailureHandler(function (e) {
+          var err = new Error(friendlyError(e));
+          err.network = true;
+          reject(err);
+        })[fn].apply(null, args);
+    });
+  };
+
+  /** Panggil fungsi server DENGAN token sebagai argumen pertama. */
+  App.api = function (fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return App.call.apply(null, [fn, App.token()].concat(args));
+  };
+
+  function friendlyError(e) {
+    var m = (e && e.message) || String(e || '');
+    if (/NetworkError|network|Failed to fetch|disconnected/i.test(m)) return 'Koneksi internet bermasalah. Coba lagi.';
+    return m || 'Terjadi kesalahan pada server.';
+  }
+
+  /** Dipanggil saat token kedaluwarsa / akun dinonaktifkan. Halaman bisa override. */
+  App.onExpired = function (msg) {
+    App.clearSession();
+    App.toast(msg || 'Sesi berakhir, silakan login ulang.', 'warn');
+    if (typeof App.showLogin === 'function') App.showLogin();
+  };
+
+  /** Cek token saat halaman dibuka. role: 'admin' | 'petugas' | ['admin','pendataan']. Return Promise<session|null>. */
+  App.restoreSession = function (role) {
+    var roles = [].concat(role);
+    var tok = App.token();
+    if (!tok) return Promise.resolve(null);
+    return App.call('whoAmI', tok).then(function (s) {
+      if (roles.indexOf(s.role) === -1) { App.clearSession(); return null; }
+      App.saveSession(s);
+      return s;
+    }).catch(function (err) {
+      if (err.network) {           // offline: pakai sesi lokal bila belum kedaluwarsa
+        var c = App.cachedSession();
+        if (c && roles.indexOf(c.role) !== -1 && c.exp > Date.now()) { App.session = c; return c; }
+      }
+      App.clearSession();
+      return null;
+    });
+  };
+
+  App.logout = function () {
+    var tok = App.token();
+    App.clearSession();
+    if (tok) App.call('logout', tok).catch(function () {});
+  };
+
+  /* ---------- UI helper ---------- */
+
+  App.esc = function (s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  };
+
+  App.$ = function (sel, root) { return (root || document).querySelector(sel); };
+  App.$$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+
+  App.icons = function () { if (window.lucide) lucide.createIcons({ attrs: { 'stroke-width': 1.75 } }); };
+
+  App.toast = function (msg, type, ms) {
+    var box = App.$('#toasts');
+    if (!box) { box = document.createElement('div'); box.id = 'toasts'; box.className = 'toasts'; document.body.appendChild(box); }
+    var t = document.createElement('div');
+    t.className = 'toast ' + (type || '');
+    t.setAttribute('role', 'status');
+    t.textContent = msg;
+    box.appendChild(t);
+    setTimeout(function () { t.remove(); }, ms || 3200);
+  };
+
+  var loadingCount = 0;
+  App.loading = function (on) {
+    var el = App.$('#loading');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'loading'; el.className = 'loading hidden';
+      el.innerHTML = '<div class="spinner" aria-label="Memuat"></div>';
+      document.body.appendChild(el);
+    }
+    loadingCount = Math.max(0, loadingCount + (on ? 1 : -1));
+    el.classList.toggle('hidden', loadingCount === 0);
+  };
+
+  /** Tombol menampilkan spinner selama promise berjalan. */
+  App.busy = function (btn, promise) {
+    if (!btn) return promise;
+    var html = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    return promise.finally(function () { btn.disabled = false; btn.innerHTML = html; App.icons(); });
+  };
+
+  /** Modal sederhana. opts: {title, html, okText, cancelText, danger}. Return Promise<boolean>. */
+  App.modal = function (opts) {
+    return new Promise(function (resolve) {
+      var wrap = document.createElement('div');
+      wrap.className = 'modal';
+      wrap.innerHTML =
+        '<div class="modal-box" role="dialog" aria-modal="true">' +
+          (opts.title ? '<h2>' + App.esc(opts.title) + '</h2>' : '') +
+          '<div class="modal-body">' + (opts.html || '') + '</div>' +
+          '<div class="modal-actions">' +
+            (opts.cancelText === false ? '' : '<button class="btn ghost" data-act="no">' + App.esc(opts.cancelText || 'Batal') + '</button>') +
+            '<button class="btn ' + (opts.danger ? 'danger' : 'primary') + '" data-act="yes">' + App.esc(opts.okText || 'OK') + '</button>' +
+          '</div>' +
+        '</div>';
+      function close(v) { wrap.remove(); resolve(v); }
+      wrap.addEventListener('click', function (e) {
+        var act = e.target.closest('[data-act]');
+        if (act) {
+          if (act.dataset.act === 'yes' && opts.onOk && opts.onOk(wrap) === false) return;
+          close(act.dataset.act === 'yes');
+        } else if (e.target === wrap && opts.dismissable !== false) close(false);
+      });
+      document.body.appendChild(wrap);
+      if (opts.onOpen) opts.onOpen(wrap);
+      App.icons();
+    });
+  };
+
+  /** Pop-up konfirmasi setiap perubahan: tombol selalu "Ya" (lanjut) dan "Tidak" (batal). Return Promise<boolean>. */
+  App.confirm = function (title, text, okText, danger) {
+    return App.modal({
+      title: title,
+      html: '<p class="muted" style="margin:0">' + App.esc(text) + '</p>',
+      okText: 'Ya', cancelText: 'Tidak', danger: danger, dismissable: false
+    });
+  };
+
+  /** Ambil nilai form: field dengan nama sama (checkbox) → array. */
+  App.formValues = function (form) {
+    var out = {};
+    App.$$('input, select, textarea', form).forEach(function (el) {
+      if (!el.name) return;
+      if (el.type === 'checkbox') {
+        if (el.dataset.multi !== undefined) { out[el.name] = out[el.name] || []; if (el.checked) out[el.name].push(el.value); }
+        else out[el.name] = el.checked;
+      } else if (el.type === 'radio') { if (el.checked) out[el.name] = el.value; }
+      else out[el.name] = el.value.trim();
+    });
+    return out;
+  };
+
+  /**
+   * Modal berisi form. opts: {title, html, okText, values, onOpen(form), onSubmit(values, form) → Promise}
+   * Modal tetap terbuka bila onSubmit gagal; pesan error tampil di dalam modal.
+   */
+  App.formModal = function (opts) {
+    return new Promise(function (resolve) {
+      var wrap = document.createElement('div');
+      wrap.className = 'modal';
+      wrap.innerHTML =
+        '<form class="modal-box" novalidate>' +
+          '<h2>' + App.esc(opts.title) + '</h2>' +
+          '<div class="stack">' + opts.html + '</div>' +
+          '<div class="error-text" data-err role="alert" style="margin-top:10px"></div>' +
+          '<div class="modal-actions">' +
+            '<button type="button" class="btn ghost" data-close>Batal</button>' +
+            '<button type="submit" class="btn primary">' + App.esc(opts.okText || 'Simpan') + '</button>' +
+          '</div>' +
+        '</form>';
+      var form = wrap.firstChild;
+      var vals = opts.values || {};
+      Object.keys(vals).forEach(function (k) {
+        App.$$('[name="' + k + '"]', form).forEach(function (el) {
+          var v = vals[k];
+          if (el.type === 'checkbox') el.checked = Array.isArray(v) ? v.indexOf(el.value) !== -1 : !!v;
+          else if (el.type === 'radio') el.checked = el.value === v;
+          else el.value = v === null || v === undefined ? '' : v;
+        });
+      });
+      function close(v) { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v); }
+      function onKey(e) {
+        var top = App.$$('.modal').pop();
+        if (e.key === 'Escape' && top === wrap) close(null);   // abaikan bila pop-up Ya/Tidak sedang terbuka di atasnya
+      }
+      document.addEventListener('keydown', onKey);
+      wrap.addEventListener('click', function (e) {
+        if (e.target === wrap || e.target.closest('[data-close]')) close(null);
+      });
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var errEl = form.querySelector('[data-err]');
+        errEl.textContent = '';
+        var missing = App.$$('[required]', form).filter(function (el) { return !String(el.value).trim(); });
+        if (missing.length) {
+          var lbl = missing[0].closest('.field');
+          errEl.textContent = (lbl ? lbl.querySelector('span').textContent : 'Kolom') + ' wajib diisi.';
+          missing[0].focus();
+          return;
+        }
+        var btn = form.querySelector('button[type=submit]');
+        var values = App.formValues(form);
+        function go() {
+          App.busy(btn, new Promise(function (r) { r(opts.onSubmit(values, form)); }))
+            .then(function (res) { close(res === undefined ? true : res); })
+            .catch(function (err) { errEl.textContent = err.message; });
+        }
+        if (opts.confirm === false) return go();
+        // Setiap perubahan dikonfirmasi dulu: Ya → simpan, Tidak → batal (form tetap terbuka, isian tidak hilang).
+        var ok = opts.okText && opts.okText !== 'Simpan' ? opts.okText : 'Simpan perubahan';
+        App.confirm(opts.confirmTitle || ok + '?', opts.confirmText || 'Perubahan akan langsung disimpan. Lanjutkan?')
+          .then(function (yes) {
+            if (yes) go();
+            else App.toast('Dibatalkan — belum ada yang disimpan.', 'warn', 2500);
+          });
+      });
+      document.body.appendChild(wrap);
+      if (opts.onOpen) opts.onOpen(form);
+      App.icons();
+      var first = form.querySelector('input:not([type=hidden]):not([type=checkbox]), select, textarea');
+      if (first && window.innerWidth > 640) first.focus();
+    });
+  };
+
+  /** Normalisasi teks untuk pencarian (huruf kecil, tanpa spasi ganda). */
+  App.norm = function (s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+
+  /** Muat script eksternal sekali saja. */
+  var loaded = {};
+  App.loadScript = function (src) {
+    if (!loaded[src]) loaded[src] = new Promise(function (res, rej) {
+      var s = document.createElement('script'); s.src = src; s.onload = res;
+      s.onerror = function () { delete loaded[src]; rej(new Error('Gagal memuat pustaka. Periksa koneksi.')); };
+      document.head.appendChild(s);
+    });
+    return loaded[src];
+  };
+
+  /** Unduh teks sebagai file (CSV dll.). */
+  App.download = function (filename, text, mime) {
+    var blob = new Blob(['﻿' + text], { type: mime || 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  };
+
+  App.statusBadge = function (st) {
+    var cls = { 'Aktif': 'ok', 'Dibuka': 'ok', 'Hadir': 'ok', 'Nonaktif': 'err', 'Ditutup': '', 'Selesai': '',
+                'Izin': 'info', 'Sakit': 'warn', 'Alpa': 'err' }[st];
+    return '<span class="badge ' + (cls || '') + '">' + App.esc(st || '-') + '</span>';
+  };
+
+  /* ---------- Logo aplikasi (SVG, dipasang ke elemen [data-logo]) ---------- */
+  App.LOGO = '<svg viewBox="0 0 64 64" role="img" aria-label="Logo Absensi Jamaah"><defs>' +
+    '<linearGradient id="lgG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#064e3b"/><stop offset="1" stop-color="#059669"/></linearGradient>' +
+    '<linearGradient id="lgA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fcd34d"/><stop offset="1" stop-color="#f59e0b"/></linearGradient></defs>' +
+    '<rect width="64" height="64" rx="16" fill="url(#lgG)"/>' +
+    '<rect x="11" y="16" width="42" height="32" rx="6" fill="#fff"/>' +
+    '<path d="M11 22a6 6 0 0 1 6-6h30a6 6 0 0 1 6 6v3H11z" fill="#a7f3d0"/>' +
+    '<g fill="#064e3b"><rect x="17" y="30" width="2.5" height="12"/><rect x="21.5" y="30" width="1.5" height="12"/><rect x="25" y="30" width="3" height="12"/>' +
+    '<rect x="30" y="30" width="1.5" height="12"/><rect x="33.5" y="30" width="2.5" height="12"/><rect x="38" y="30" width="1.5" height="12"/></g>' +
+    '<circle cx="45" cy="40" r="7" fill="url(#lgA)"/><path d="M41.8 40.2l2.2 2.2 4.2-4.4" fill="none" stroke="#3b2500" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<path d="M51 6l1.4 3.2 3.2 1.4-3.2 1.4L51 15.2l-1.4-3.2-3.2-1.4 3.2-1.4z" fill="#fcd34d"/></svg>';
+  // ID gradient unik per logo: logo di bagian yang tersembunyi (mis. halaman login) tidak membuat logo lain pudar.
+  var logoUid = 0;
+  App.logoSvg = function () { var n = ++logoUid; return App.LOGO.replace(/lgG/g, 'lgG' + n).replace(/lgA/g, 'lgA' + n); };
+  App.mountLogos = function () { App.$$('[data-logo]').forEach(function (el) { if (!el.firstChild) el.innerHTML = App.logoSvg(); }); };
+
+  /* ---------- Branding dari Profil Yayasan (logo & nama) ---------- */
+  App.brand = null;
+  App.applyBrand = function (p) {
+    if (!p) return;
+    App.brand = { nama_yayasan: p.nama_yayasan || '', singkatan: p.singkatan || '', nama_program: p.nama_program || '', logo: p.logo || '' };
+    App.store.set('absensi_brand', App.brand);
+    App.$$('[data-logo]').forEach(function (el) {
+      // Logo apa adanya (PNG transparan tetap transparan, tanpa latar putih).
+      el.innerHTML = App.brand.logo ? '<img src="' + App.esc(App.brand.logo) + '" alt="Logo" style="width:100%;height:100%;object-fit:contain">' : App.logoSvg();
+    });
+    // Ikon tab browser. Di Apps Script ikon diatur server (setFaviconUrl); ini untuk halaman yang dibuka langsung.
+    var ikon = App.brand.logo || '';
+    var link = document.querySelector('link[rel="icon"]');
+    if (ikon) {
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.type = (ikon.match(/^data:(image\/[a-z+]+)/) || [])[1] || 'image/png';
+      link.href = ikon;
+    } else if (link) link.remove();
+    App.$$('[data-brand="nama"]').forEach(function (el) {
+      if (!el.dataset.default) el.dataset.default = el.textContent;
+      el.textContent = App.brand.nama_yayasan || el.dataset.default;
+    });
+  };
+  App.loadBrand = function () {
+    App.applyBrand(App.store.get('absensi_brand', null));
+    return App.call('getProfilPublik').then(App.applyBrand).catch(function () {});
+  };
+
+  /* ---------- Tema terang / gelap (dipakai login & panel admin) ---------- */
+  App.applyTheme = function (t) {
+    document.documentElement.setAttribute('data-theme', t);
+    App.store.set('absensi_theme', t);
+    App.$$('[data-theme-set]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeSet === t)); });
+  };
+  App.initTheme = function () {
+    var t = App.store.get('absensi_theme', '');
+    if (t !== 'dark' && t !== 'light') t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    App.applyTheme(t);
+    App.$$('[data-theme-set]').forEach(function (b) {
+      if (b._themeBound) return; b._themeBound = true;
+      b.addEventListener('click', function () { App.applyTheme(b.dataset.themeSet); });
+    });
+  };
+
+  /* ---------- Foto jamaah: selalu dikonversi ke WebP sebelum diunggah ---------- */
+  /**
+   * File gambar (kamera / galeri) → { foto, thumb } berformat WebP.
+   *  foto  : sisi terpanjang maks 480 px, kualitas 0.8 (±20–40 KB)
+   *  thumb : persegi 72 px (crop tengah), kualitas 0.7 (±2 KB) untuk daftar & hasil scan
+   */
+  App.fotoKeWebp = function (file) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^image\//.test(file.type || 'image/')) return reject(new Error('File harus berupa gambar.'));
+      if (file.size > 15 * 1024 * 1024) return reject(new Error('Foto terlalu besar (maks. 15 MB).'));
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Gambar tidak bisa dibaca.')); };
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var w = img.naturalWidth, h = img.naturalHeight;
+        function draw(cw, ch, sx, sy, sw, sh, q) {
+          var c = document.createElement('canvas'); c.width = cw; c.height = ch;
+          var g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, cw, ch);
+          g.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+          return c.toDataURL('image/webp', q);
+        }
+        var sc = Math.min(1, 480 / Math.max(w, h));
+        var foto = draw(Math.round(w * sc), Math.round(h * sc), 0, 0, w, h, 0.8);
+        if (foto.length > 150000) foto = draw(Math.round(w * sc * 0.75), Math.round(h * sc * 0.75), 0, 0, w, h, 0.7);
+        var s = Math.min(w, h);
+        var thumb = draw(72, 72, (w - s) / 2, Math.max(0, (h - s) / 2.6), s, s, 0.7);   // crop tengah (sedikit ke atas: wajah)
+        if (foto.indexOf('data:image/webp') !== 0) return reject(new Error('Browser ini belum bisa membuat WebP. Gunakan Chrome versi terbaru.'));
+        resolve({ foto: foto, thumb: thumb });
+      };
+      img.src = url;
+    });
+  };
+
+  /** Avatar bulat: foto bila ada, selain itu inisial nama. size dalam px. */
+  App.avatar = function (thumb, nama, size, extraCls) {
+    size = size || 36;
+    var st = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.38) + 'px';
+    if (thumb) return '<img class="ava ' + (extraCls || '') + '" style="' + st + '" src="' + App.esc(thumb) + '" alt="">';
+    var ini = String(nama || '?').trim().split(/\s+/).map(function (w) { return w[0]; }).slice(0, 2).join('').toUpperCase();
+    return '<span class="ava ava-ini ' + (extraCls || '') + '" style="' + st + '">' + App.esc(ini) + '</span>';
+  };
+
+  /* ---------- Format ---------- */
+  App.pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  App.today = function () { var d = new Date(); return d.getFullYear() + '-' + App.pad(d.getMonth() + 1) + '-' + App.pad(d.getDate()); };
+  App.nowStr = function () { var d = new Date(); return App.today() + ' ' + App.pad(d.getHours()) + ':' + App.pad(d.getMinutes()) + ':' + App.pad(d.getSeconds()); };
+  App.jam = function (ts) { return ts ? String(ts).substring(11, 16) : ''; };
+  var BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  var HARI = ['Ahad', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  App.tgl = function (ymd, withDay) {
+    if (!ymd) return '';
+    var p = String(ymd).substring(0, 10).split('-');
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return (withDay ? HARI[d.getDay()] + ', ' : '') + (+p[2]) + ' ' + BULAN[+p[1] - 1] + ' ' + p[0];
+  };
+
+  document.addEventListener('DOMContentLoaded', function () { App.mountLogos(); App.initTheme(); App.icons(); App.loadBrand(); });
+})();
+</script>

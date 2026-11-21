@@ -1,0 +1,269 @@
+<!-- fasilitator.html — master fasilitator (pendamping jamaah) + jamaah binaan -->
+<section id="view-fasilitator" hidden>
+  <div class="toolbar">
+    <div class="input-wrap search">
+      <i data-lucide="search"></i>
+      <input class="input" id="fsSearch" type="search" placeholder="Cari fasilitator / kelas…" autocomplete="off">
+    </div>
+    <select class="input" id="fsStatus"><option value="Aktif">Aktif</option><option value="Nonaktif">Nonaktif</option><option value="">Semua status</option></select>
+    <span class="dim" id="fsNote"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr>
+        <th>Nama fasilitator</th><th>Kelas</th><th class="hide-sm-col">No HP</th><th class="hide-sm-col">JK</th>
+        <th>Jamaah binaan</th><th>Akun login</th><th>Status</th><th style="text-align:right">Aksi</th>
+      </tr></thead>
+      <tbody id="fsBody"><tr><td colspan="8" class="empty">Memuat…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+(function () {
+  var $ = App.$;
+  var state = { rows: [], tanpa: 0 };
+  function jk(v) { return v === 'L' ? 'Ikhwan' : v === 'P' ? 'Akhwat' : '–'; }
+  var KELAS = ["Iqro' 1", "Iqro' 2", "Iqro' 3", "Iqro' 4", "Iqro' 5", "Iqro' 6", "Qur'an Kecil", "Qur'an Sedang", "Qur'an Besar"];
+
+  function load() {
+    return App.api('listFasilitator').then(function (d) {
+      state.rows = d.rows; state.tanpa = d.tanpa_fasilitator; render();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function filtered() {
+    var q = App.norm($('#fsSearch').value), st = $('#fsStatus').value;
+    return state.rows.filter(function (f) { return (!st || f.status === st) && (!q || App.norm(f.nama + ' ' + f.no_hp + ' ' + f.kelas + ' ' + f.username).indexOf(q) !== -1); })
+      .sort(function (a, b) {
+        var ka = a.kategori || '~', kb = b.kategori || '~';
+        if (ka !== kb) return ka.localeCompare(kb);
+        var ia = KELAS.indexOf(a.kelas), ib = KELAS.indexOf(b.kelas);
+        if (ia !== ib) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+        return a.nama.localeCompare(b.nama, 'id');
+      });
+  }
+
+  function render() {
+    var list = filtered();
+    var aktif = state.rows.filter(function (f) { return f.status === 'Aktif'; }).length;
+    if (Admin.current === 'fasilitator') Admin.setSubtitle(aktif + ' fasilitator aktif · ' + state.tanpa + ' jamaah aktif belum punya fasilitator');
+    Admin.setCount('fasilitator', aktif);
+    $('#fsBody').innerHTML = list.length ? list.map(function (f) {
+      return '<tr data-id="' + App.esc(f.id_fasilitator) + '">' +
+        '<td><b>' + App.esc(f.nama) + '</b><div class="dim mono">' + App.esc(f.id_fasilitator) + '</div></td>' +
+        '<td>' + (f.kelas ? '<b>' + App.esc(f.kelas) + '</b>' : '<span class="dim">–</span>') + (f.kategori ? '<div class="dim">' + App.esc(f.kategori) + '</div>' : '') + '</td>' +
+        '<td class="hide-sm-col mono">' + App.esc(f.no_hp || '–') + '</td>' +
+        '<td class="hide-sm-col">' + jk(f.jenis_kelamin) + '</td>' +
+        '<td><button class="link" data-act="binaan">' + f.jamaah_aktif + ' aktif</button><span class="dim"> / ' + f.jumlah_jamaah + ' total</span></td>' +
+        '<td>' + (f.punya_akun ? '<span class="mono">' + App.esc(f.username) + '</span>' : '<span class="dim">Belum ada</span>') + '</td>' +
+        '<td>' + App.statusBadge(f.status) + '</td>' +
+        '<td><div class="actions">' +
+          '<button class="btn" data-act="binaan" title="Atur jamaah binaan"><i data-lucide="users"></i></button>' +
+          '<button class="btn" data-act="edit" title="Edit / akun login"><i data-lucide="pencil"></i></button>' +
+          (f.punya_akun ? '<button class="btn" data-act="pin" title="Reset PIN"><i data-lucide="key-round"></i></button>' : '') +
+          '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
+        '</div></td></tr>';
+    }).join('') : '<tr><td colspan="8" class="empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</td></tr>';
+    App.icons();
+  }
+
+  function form(rec) {
+    var isEdit = !!rec;
+    App.formModal({
+      title: isEdit ? 'Edit Fasilitator' : 'Tambah Fasilitator',
+      values: rec || { status: 'Aktif' },
+      html: '<div class="form-grid">' +
+        '<label class="field full"><span>Nama fasilitator *</span><input class="input" name="nama" required maxlength="80" placeholder="mis. Khansa & Silma (2 orang pakai &)"></label>' +
+        '<label class="field"><span>Kelas (tingkat)</span><select class="input" name="kelas"><option value="">—</option>' +
+          KELAS.map(function (k) { return '<option>' + App.esc(k) + '</option>'; }).join('') + '</select></label>' +
+        '<label class="field"><span>Kategori</span><select class="input" name="kategori"><option value="">—</option><option>Ibu &amp; Bapak</option><option>Remaja &amp; Anak</option></select></label>' +
+        '<label class="field"><span>No HP</span><input class="input" name="no_hp" inputmode="tel" placeholder="08xxxxxxxxxx"></label>' +
+        '<label class="field"><span>Jenis kelamin</span><select class="input" name="jenis_kelamin"><option value="">—</option><option value="L">Ikhwan</option><option value="P">Akhwat</option></select></label>' +
+        '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
+        '<label class="field full"><span>Catatan</span><input class="input" name="catatan"></label></div>' +
+        '<div class="sec-title" style="margin-top:6px">Akun login fasilitator</div>' +
+        '<p class="dim" style="margin:0 0 8px">Untuk melaporkan perkembangan jamaah binaan (Iqro&#39; / Qur&#39;an). Login di halaman Admin → tab <b>Fasilitator</b>. Kosongkan username bila tidak perlu login.</p>' +
+        '<div class="form-grid">' +
+        '<label class="field"><span>Username</span><input class="input" name="username" autocapitalize="none" spellcheck="false" placeholder="huruf kecil, mis. khansa"></label>' +
+        '<label class="field"><span>' + (isEdit && rec.punya_akun ? 'PIN baru (kosongkan bila tetap)' : 'PIN (4–6 angka)') + '</span>' +
+          '<input class="input pin-input" name="pin" inputmode="numeric" maxlength="6" autocomplete="off"></label></div>' +
+        (isEdit ? '<p class="dim" style="margin:0">Mengganti nama juga memperbarui ' + rec.jumlah_jamaah + ' jamaah binaan dan daftar peserta program.</p>' : ''),
+      onOpen: function (fm) { fm.pin.addEventListener('input', function () { fm.pin.value = fm.pin.value.replace(/\D/g, '').slice(0, 6); }); },
+      onSubmit: function (v) {
+        v.username = (v.username || '').toLowerCase();
+        if (v.username && !/^[a-z0-9._]{3,20}$/.test(v.username)) throw new Error('Username 3–20 karakter: huruf kecil, angka, titik, atau garis bawah.');
+        if (v.pin && !/^\d{4,6}$/.test(v.pin)) throw new Error('PIN harus 4–6 angka.');
+        if (v.username && !v.pin && !(isEdit && rec.punya_akun)) throw new Error('Isi PIN untuk akun login fasilitator.');
+        if (isEdit) v.id_fasilitator = rec.id_fasilitator;
+        return App.api('saveFasilitator', v);
+      }
+    }).then(function (r) { if (r) { App.toast('Fasilitator disimpan: ' + r.nama, 'ok'); load(); } });
+  }
+
+  /* ---------- Jamaah binaan: daftar + pemilih jamaah (cari, filter, pilih banyak) ---------- */
+  function usiaDari(tgl) {
+    if (!tgl) return '';
+    var p = tgl.split('-'), t = App.today().split('-');
+    var u = +t[0] - +p[0] - ((+t[1] < +p[1] || (+t[1] === +p[1] && +t[2] < +p[2])) ? 1 : 0);
+    return u >= 0 && u < 130 ? u : '';
+  }
+  /** Kategori jamaah dari usia: < 21 th = Remaja & Anak. Tanpa tanggal lahir = tidak diketahui. */
+  function kategoriJamaah(j) {
+    var u = usiaDari(j.tanggal_lahir);
+    return u === '' ? '' : u < 21 ? 'Remaja & Anak' : 'Ibu & Bapak';
+  }
+
+  function binaan(f) {
+    App.loading(true);
+    Promise.all([App.api('jamaahBinaan', f.id_fasilitator), App.api('listJamaah')]).then(function (res) {
+      App.loading(false);
+      var d = res[0], all = res[1].rows, thumbs = res[1].thumbs || {};
+      var kelasOf = {}; state.rows.forEach(function (x) { kelasOf[x.nama] = x.kelas || ''; });
+      var kandidat = all.filter(function (j) { return j.status === 'Aktif' && j.kelompok !== f.nama; })
+        .sort(function (a, c) { return a.nama.localeCompare(c.nama, 'id'); });
+      var pilih = {};
+      var esc = App.esc;
+
+      var html =
+        '<div class="bn-head">' +
+          (f.kelas ? '<span class="lp-ind">' + esc(f.kelas) + '</span>' : '') +
+          (f.kategori ? '<span class="chip">' + esc(f.kategori) + '</span>' : '') +
+          '<span class="dim">' + d.rows.length + ' jamaah binaan</span></div>' +
+        '<div class="bn-sec">Jamaah binaan</div>' +
+        '<div class="bn-list bn-cur">' + (d.rows.length ? d.rows.map(function (j) {
+          return '<div class="bn-item">' + App.avatar(thumbs[j.id_jamaah], j.nama, 36) +
+            '<div class="bn-txt"><b>' + esc(j.nama) + '</b><span class="mono">' + esc(j.id_jamaah) + '</span>' + (j.desa ? '<span> · ' + esc(j.desa) + '</span>' : '') + '</div>' +
+            '<button type="button" class="btn ghost bn-x" data-lepas="' + esc(j.id_jamaah) + '" data-nm="' + esc(j.nama) + '" title="Lepaskan dari kelas ini" aria-label="Lepaskan ' + esc(j.nama) + '"><i data-lucide="user-minus"></i></button></div>';
+        }).join('') : '<div class="bn-empty">Belum ada jamaah binaan. Pilih dari daftar di bawah.</div>') + '</div>' +
+        '<div class="bn-sec">Tambahkan jamaah</div>' +
+        '<div class="bn-tools">' +
+          '<div class="input-wrap search"><i data-lucide="search"></i><input class="input" data-q type="search" placeholder="Cari nama, panggilan, No Jamaah, desa…" autocomplete="off"></div>' +
+          '<div class="bn-seg" role="group" aria-label="Filter jamaah">' +
+            '<button type="button" data-flt="bebas" class="on">Belum punya kelas</button>' +
+            '<button type="button" data-flt="semua">Semua</button>' +
+          '</div>' +
+          (f.kategori ? '<label class="bn-cek"><input type="checkbox" data-kat checked> Hanya ' + esc(f.kategori) + ' <span class="dim">(dari usia)</span></label>' : '') +
+        '</div>' +
+        '<div class="bn-list bn-pick" data-pick></div>' +
+        '<div class="bn-foot dim" data-info></div>';
+
+      App.modal({
+        title: 'Jamaah binaan · ' + f.nama, html: html, okText: 'Tambahkan', cancelText: 'Tutup',
+        onOpen: function (wrap) {
+          wrap.querySelector('.modal-box').classList.add('modal-lg');
+          var flt = 'bebas', q = wrap.querySelector('[data-q]'), kat = wrap.querySelector('[data-kat]');
+          var okBtn = wrap.querySelector('[data-act=yes]');
+          function render() {
+            var qq = App.norm(q.value);
+            var list = kandidat.filter(function (j) {
+              if (flt === 'bebas' && j.kelompok) return false;
+              if (kat && kat.checked) { var kj = kategoriJamaah(j); if (kj && kj !== f.kategori) return false; }
+              return !qq || App.norm([j.nama, j.nama_panggilan, j.id_jamaah, j.desa].join(' ')).indexOf(qq) !== -1;
+            });
+            wrap.querySelector('[data-pick]').innerHTML = list.length ? list.slice(0, 200).map(function (j) {
+              var u = usiaDari(j.tanggal_lahir);
+              return '<label class="bn-item bn-opt' + (pilih[j.id_jamaah] ? ' on' : '') + '">' +
+                '<input type="checkbox" value="' + esc(j.id_jamaah) + '"' + (pilih[j.id_jamaah] ? ' checked' : '') + '>' +
+                App.avatar(thumbs[j.id_jamaah], j.nama, 36) +
+                '<div class="bn-txt"><b>' + esc(j.nama) + (j.nama_panggilan && j.nama_panggilan !== j.nama ? ' <i class="dim">(' + esc(j.nama_panggilan) + ')</i>' : '') + '</b>' +
+                  '<span class="mono">' + esc(j.id_jamaah) + '</span>' + (j.desa ? '<span> · ' + esc(j.desa) + '</span>' : '') + (u !== '' ? '<span> · ' + u + ' th</span>' : '') + '</div>' +
+                (j.kelompok
+                  ? '<span class="bn-tag move" title="' + esc(j.kelompok) + '">' + esc(kelasOf[j.kelompok] || 'Kelas lain') + '</span>'
+                  : '<span class="bn-tag free">Belum ada kelas</span>') +
+              '</label>';
+            }).join('') : '<div class="bn-empty">Tidak ada jamaah yang cocok.' + (flt === 'bebas' ? ' Coba filter <b>Semua</b>.' : '') + '</div>';
+            var n = Object.keys(pilih).length;
+            okBtn.textContent = n ? 'Tambahkan (' + n + ')' : 'Tambahkan';
+            okBtn.disabled = !n;
+            wrap.querySelector('[data-info]').textContent = list.length + ' jamaah ditampilkan' + (list.length > 200 ? ' (200 pertama, persempit pencarian)' : '') + (n ? ' · ' + n + ' dipilih' : '');
+          }
+          var t;
+          q.addEventListener('input', function () { clearTimeout(t); t = setTimeout(render, 100); });
+          if (kat) kat.addEventListener('change', render);
+          wrap.addEventListener('change', function (e) {
+            var c = e.target.closest('[data-pick] input[type=checkbox]'); if (!c) return;
+            if (c.checked) pilih[c.value] = true; else delete pilih[c.value];
+            render();
+          });
+          wrap.addEventListener('click', function (e) {
+            var fb = e.target.closest('[data-flt]');
+            if (fb) {
+              flt = fb.dataset.flt;
+              App.$$('[data-flt]', wrap).forEach(function (x) { x.classList.toggle('on', x === fb); });
+              render(); return;
+            }
+            var b = e.target.closest('[data-lepas]'); if (!b) return;
+            App.confirm('Lepaskan jamaah?', b.dataset.nm + ' tidak lagi dibina ' + f.nama + '. Riwayat laporannya tetap tersimpan.', 'Lepaskan', true).then(function (yes) {
+              if (!yes) return;
+              App.api('aturFasilitatorJamaah', [b.dataset.lepas], '').then(function () {
+                App.toast(b.dataset.nm + ' dilepas', 'ok'); wrap.querySelector('[data-act=no]').click(); load(); binaan(f);
+              }).catch(function (er) { App.toast(er.message, 'err'); });
+            });
+          });
+          render();
+          if (window.innerWidth > 640) q.focus();
+        },
+        onOk: function () {
+          var ids = Object.keys(pilih);
+          if (!ids.length) return false;
+          var dipilih = kandidat.filter(function (j) { return pilih[j.id_jamaah]; });
+          var pindah = dipilih.filter(function (j) { return j.kelompok; }).length;
+          var nama = dipilih.map(function (j) { return j.nama; });
+          App.confirm('Tambahkan ' + ids.length + ' jamaah?',
+            nama.slice(0, 5).join(', ') + (nama.length > 5 ? ' dan ' + (nama.length - 5) + ' lainnya' : '') + ' akan dibina oleh ' + f.nama + '.' +
+            (pindah ? ' ' + pindah + ' di antaranya dipindah dari kelas lain.' : '')).then(function (yes) {
+            if (!yes) { App.toast('Dibatalkan — belum ada yang disimpan.', 'warn', 2500); binaan(f); return; }
+            App.api('aturFasilitatorJamaah', ids, f.nama).then(function (r) {
+              App.toast(r.diubah + ' jamaah ditambahkan ke ' + f.nama, 'ok'); load(); binaan(f);
+            }).catch(function (e) { App.toast(e.message, 'err'); binaan(f); });
+          });
+        }
+      });
+    }).catch(function (e) { App.loading(false); App.toast(e.message, 'err'); });
+  }
+
+  function del(f) {
+    App.confirm('Hapus fasilitator?', f.nama + ' akan dihapus. ' + f.jumlah_jamaah + ' jamaah binaannya menjadi "belum ada fasilitator" (data jamaah tidak dihapus).', 'Hapus', true)
+      .then(function (ok) {
+        if (!ok) return;
+        App.api('deleteFasilitator', f.id_fasilitator).then(function (r) { App.toast('Dihapus · ' + r.dilepas + ' jamaah dilepas', 'ok'); load(); })
+          .catch(function (e) { App.toast(e.message, 'err'); });
+      });
+  }
+
+  function resetPin(f) {
+    App.formModal({
+      title: 'Reset PIN · ' + f.username, okText: 'Reset PIN',
+      html: '<p class="muted" style="margin:0">Kosongkan untuk PIN acak. Fasilitator otomatis keluar dan harus login dengan PIN baru.</p>' +
+        '<label class="field"><span>PIN baru (opsional)</span><input class="input pin-input" name="pin" inputmode="numeric" maxlength="6" autocomplete="off"></label>',
+      onSubmit: function (v) {
+        if (v.pin && !/^\d{4,6}$/.test(v.pin)) throw new Error('PIN harus 4–6 angka.');
+        return App.api('resetPinFasilitator', f.id_fasilitator, v.pin);
+      }
+    }).then(function (res) {
+      if (!res) return;
+      App.modal({ title: 'PIN baru untuk ' + res.username,
+        html: '<div class="big-pin mono">' + App.esc(res.pin) + '</div><p class="muted">Catat dan berikan ke fasilitator. PIN ini tidak bisa dilihat lagi.</p>',
+        okText: 'Sudah dicatat', cancelText: false, dismissable: false });
+    });
+  }
+
+  var t;
+  $('#fsSearch').addEventListener('input', function () { clearTimeout(t); t = setTimeout(render, 120); });
+  $('#fsStatus').addEventListener('change', render);
+  $('#fsBody').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-act]'); if (!b) return;
+    var id = b.closest('tr').dataset.id;
+    var f = state.rows.filter(function (x) { return x.id_fasilitator === id; })[0];
+    ({ binaan: binaan, edit: form, del: del, pin: resetPin })[b.dataset.act](f);
+  });
+
+  Admin.register('fasilitator', {
+    title: 'Fasilitator', nav: 'Fasilitator', icon: 'user-round-check', show: load,
+    subtitle: 'Pendamping jamaah',
+    actions: [{ label: 'Tambah Fasilitator', icon: 'user-plus', cls: 'primary', onClick: function () { form(null); } }]
+  });
+})();
+</script>

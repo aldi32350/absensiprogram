@@ -1,0 +1,144 @@
+<!-- petugas.html — CRUD petugas, penugasan program, reset PIN -->
+<section id="view-petugas" hidden>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Nama</th><th>Username</th><th>Program ditangani</th><th>Status</th><th style="text-align:right">Aksi</th></tr></thead>
+      <tbody id="ptBody"><tr><td colspan="5" class="empty">Memuat…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+(function () {
+  var $ = App.$;
+  var state = { rows: [], programs: [] };
+
+  function progName(id) {
+    var p = state.programs.filter(function (x) { return x.id_program === id; })[0];
+    return p ? p.nama_program : id;
+  }
+
+  function load() {
+    return App.api('listPetugas').then(function (d) {
+      state.rows = d.rows; state.programs = d.programs; render();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function render() {
+    $('#ptBody').innerHTML = state.rows.length ? state.rows.map(function (p) {
+      var on = p.status === 'Aktif';
+      return '<tr data-id="' + App.esc(p.id_petugas) + '">' +
+        '<td><b>' + App.esc(p.nama) + '</b><div class="dim mono">' + App.esc(p.id_petugas) + '</div></td>' +
+        '<td class="mono">' + App.esc(p.username) + '</td>' +
+        '<td>' + (p.jenis === 'pendataan'
+          ? '<span class="chip gold">Pendataan · data master jamaah</span>'
+          : (p.program_ids.length ? p.program_ids.map(function (id) { return '<span class="chip">' + App.esc(progName(id)) + '</span>'; }).join('') : '<span class="dim">Belum ditugaskan</span>')) + '</td>' +
+        '<td>' + App.statusBadge(p.status) + '</td>' +
+        '<td><div class="actions">' +
+          '<button class="btn" data-act="edit" title="Edit"><i data-lucide="pencil"></i></button>' +
+          '<button class="btn" data-act="pin" title="Reset PIN"><i data-lucide="key-round"></i></button>' +
+          '<button class="btn" data-act="toggle" title="' + (on ? 'Nonaktifkan' : 'Aktifkan') + '"><i data-lucide="' + (on ? 'user-x' : 'user-check') + '"></i></button>' +
+          '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
+        '</div></td></tr>';
+    }).join('') : '<tr><td colspan="5" class="empty">Belum ada petugas.</td></tr>';
+    App.icons();
+  }
+
+  function form(rec) {
+    var isEdit = !!rec;
+    App.formModal({
+      title: isEdit ? 'Edit Petugas · ' + rec.username : 'Tambah Petugas',
+      values: rec || { status: 'Aktif', program_ids: [], jenis: 'absensi' },
+      html: '<div class="field"><span>Jenis tugas</span><div class="check-grid">' +
+          '<label class="check"><input type="radio" name="jenis" value="absensi"> <span><b>Absensi</b><br><small class="dim">Scan kartu jamaah di HP</small></span></label>' +
+          '<label class="check"><input type="radio" name="jenis" value="pendataan"> <span><b>Pendataan</b><br><small class="dim">Melengkapi &amp; menambah data master jamaah</small></span></label>' +
+        '</div></div>' +
+        '<div class="form-grid">' +
+        '<label class="field"><span>Nama *</span><input class="input" name="nama" required></label>' +
+        '<label class="field"><span>Username *</span><input class="input" name="username" required autocapitalize="none" spellcheck="false" placeholder="huruf kecil, mis. ahmad.f"></label>' +
+        (isEdit ? '' : '<label class="field"><span>PIN (4–6 angka) *</span><input class="input pin-input" name="pin" required inputmode="numeric" maxlength="6" autocomplete="off"></label>') +
+        '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
+        '</div>' +
+        '<div class="field" data-prog-field><span>Program yang ditangani</span>' +
+        (state.programs.length ? '<div class="check-grid">' + state.programs.map(function (p) {
+          return '<label class="check"><input type="checkbox" data-multi name="program_ids" value="' + App.esc(p.id_program) + '">' +
+            App.esc(p.nama_program) + (p.status !== 'Aktif' ? ' <span class="dim">(selesai)</span>' : '') + '</label>';
+        }).join('') + '</div>' : '<p class="dim">Belum ada program.</p>') + '</div>',
+      onOpen: function (f) {
+        if (f.pin) f.pin.addEventListener('input', function () { f.pin.value = f.pin.value.replace(/\D/g, '').slice(0, 6); });
+        // Program hanya relevan untuk petugas absensi
+        function syncJenis() {
+          var j = (f.querySelector('[name=jenis]:checked') || {}).value;
+          f.querySelector('[data-prog-field]').hidden = j === 'pendataan';
+        }
+        App.$$('[name=jenis]', f).forEach(function (r) { r.addEventListener('change', syncJenis); });
+        syncJenis();
+      },
+      onSubmit: function (v) {
+        if (!/^[a-z0-9._]{3,20}$/.test(v.username.toLowerCase())) throw new Error('Username 3–20 karakter: huruf kecil, angka, titik, atau garis bawah.');
+        if (!isEdit && !/^\d{4,6}$/.test(v.pin)) throw new Error('PIN harus 4–6 angka.');
+        if (isEdit) v.id_petugas = rec.id_petugas;
+        return App.api('savePetugas', v);
+      }
+    }).then(function (saved) {
+      if (!saved) return;
+      App.toast('Petugas disimpan: ' + saved.nama, 'ok');
+      load();
+    });
+  }
+
+  function resetPin(p) {
+    App.formModal({
+      title: 'Reset PIN · ' + p.username,
+      okText: 'Reset PIN',
+      html: '<p class="muted" style="margin:0">Kosongkan untuk membuat PIN acak. Petugas akan otomatis keluar dari semua HP dan harus login dengan PIN baru.</p>' +
+        '<label class="field"><span>PIN baru (opsional)</span><input class="input pin-input" name="pin" inputmode="numeric" maxlength="6" autocomplete="off"></label>',
+      onSubmit: function (v) {
+        if (v.pin && !/^\d{4,6}$/.test(v.pin)) throw new Error('PIN harus 4–6 angka.');
+        return App.api('resetPinPetugas', p.id_petugas, v.pin);
+      }
+    }).then(function (res) {
+      if (!res) return;
+      App.modal({
+        title: 'PIN baru untuk ' + res.username,
+        html: '<div class="big-pin mono">' + App.esc(res.pin) + '</div><p class="muted">Catat dan berikan ke petugas. PIN ini tidak bisa dilihat lagi.</p>',
+        okText: 'Sudah dicatat', cancelText: false, dismissable: false
+      });
+    });
+  }
+
+  function toggle(p) {
+    var to = p.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
+    App.confirm(to === 'Nonaktif' ? 'Nonaktifkan petugas?' : 'Aktifkan petugas?',
+      to === 'Nonaktif' ? p.nama + ' akan langsung keluar dari aplikasi dan tidak bisa login.' : p.nama + ' bisa login kembali.',
+      to === 'Nonaktif' ? 'Nonaktifkan' : 'Aktifkan', to === 'Nonaktif').then(function (ok) {
+      if (!ok) return;
+      App.loading(true);
+      App.api('setPetugasStatus', p.id_petugas, to).then(function () { App.toast(p.nama + ' → ' + to, 'ok'); return load(); })
+        .catch(function (e) { App.toast(e.message, 'err'); }).finally(function () { App.loading(false); });
+    });
+  }
+
+  function del(p) {
+    App.confirm('Hapus petugas?', p.nama + ' akan dihapus permanen. Hanya bisa jika belum pernah mencatat absensi.', 'Hapus', true).then(function (ok) {
+      if (!ok) return;
+      App.loading(true);
+      App.api('deletePetugas', p.id_petugas).then(function () { App.toast('Petugas dihapus', 'ok'); return load(); })
+        .catch(function (e) { App.toast(e.message, 'err', 5000); }).finally(function () { App.loading(false); });
+    });
+  }
+
+  $('#ptBody').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]'); if (!b) return;
+    var id = b.closest('tr').dataset.id;
+    var p = state.rows.filter(function (x) { return x.id_petugas === id; })[0];
+    ({ edit: form, pin: resetPin, toggle: toggle, del: del })[b.dataset.act](p);
+  });
+
+  Admin.register('petugas', {
+    title: 'Petugas Absensi', nav: 'Petugas', icon: 'badge-check', show: load,
+    subtitle: 'Login di HP dengan username + PIN, hanya untuk program yang ditugaskan',
+    actions: [{ label: 'Tambah Petugas', icon: 'user-plus', cls: 'primary', onClick: function () { form(null); } }]
+  });
+})();
+</script>

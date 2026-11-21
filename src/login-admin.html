@@ -1,0 +1,98 @@
+<!-- login-admin.html — login admin (username + password). Tampilan SAMA: panel kiri (hero) + panel kanan (form). -->
+<section id="loginAdmin" class="auth-page" hidden>
+  <div class="auth-top">
+    <div class="seg" role="group" aria-label="Pilih tema">
+      <button type="button" data-theme-set="light"><i data-lucide="sun"></i>Terang</button>
+      <button type="button" data-theme-set="dark"><i data-lucide="moon"></i>Gelap</button>
+    </div>
+  </div>
+
+  <aside class="auth-hero" aria-hidden="true">
+    <div class="auth-brand">
+      <div class="logo-img" data-logo></div>
+      <div><div class="eyebrow">Absensi Jamaah</div><div class="sub" data-brand="nama">Kehadiran Program</div></div>
+    </div>
+    <div>
+      <h2>Kehadiran jamaah, tercatat rapi dalam satu scan.</h2>
+      <p>Admin mengelola data jamaah, program, kartu, dan rekap. Petugas cukup scan kartu jamaah dari HP.</p>
+    </div>
+    <div class="auth-flow"><span>Data jamaah</span><span>Cetak kartu</span><span>Buka sesi</span><span>Scan</span><span class="done">Rekap ✓</span></div>
+  </aside>
+
+  <main class="auth-side">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="logo-img" data-logo></div>
+        <div><div class="eyebrow">Absensi Jamaah</div><div class="sub" data-brand="nama">Kehadiran Program</div></div>
+      </div>
+      <div>
+        <h1>Masuk ke akun Anda</h1>
+        <p class="lead">Pilih jenis akun, lalu masukkan username dan password / PIN.</p>
+      </div>
+      <div class="auth-tabs auth-tabs-4" role="tablist" aria-label="Jenis akun">
+        <button type="button" role="tab" aria-selected="true" data-login="admin"><i data-lucide="shield-check"></i>Admin</button>
+        <button type="button" role="tab" aria-selected="false" data-login="pendataan"><i data-lucide="clipboard-pen"></i>Pendataan</button>
+        <button type="button" role="tab" aria-selected="false" data-login="fasilitator"><i data-lucide="book-open-check"></i>Fasilitator</button>
+        <a role="tab" aria-selected="false" id="linkToPetugas" target="_top" href="#"><i data-lucide="scan-barcode"></i>Petugas</a>
+      </div>
+      <form class="auth-form" id="formLoginAdmin" autocomplete="on" novalidate>
+        <label class="field"><span>Username</span>
+          <input class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="mis. admin" required></label>
+        <label class="field"><span id="lblSecret">Password</span>
+          <div class="auth-pw">
+            <input class="input" name="password" type="password" autocomplete="current-password" required>
+            <button type="button" class="toggle-eye" aria-label="Tampilkan password"><i data-lucide="eye"></i></button>
+          </div></label>
+        <div class="error-text" id="loginAdminErr" role="alert"></div>
+        <button class="btn primary block" type="submit"><i data-lucide="log-in"></i> Masuk</button>
+      </form>
+      <div class="auth-info"><i data-lucide="info"></i>
+        <span>Akun petugas dibuat oleh admin. <b>Lupa password / PIN atau akun dinonaktifkan?</b> Hubungi admin untuk direset.</span></div>
+    </div>
+  </main>
+</section>
+
+<script>
+(function () {
+  var form = App.$('#formLoginAdmin');
+  var err = App.$('#loginAdminErr');
+  App.$('#linkToPetugas').href = App.url;
+
+  form.querySelector('.toggle-eye').addEventListener('click', function () {
+    var inp = form.password;
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    this.setAttribute('aria-label', inp.type === 'password' ? 'Tampilkan password' : 'Sembunyikan password');
+  });
+
+  // Tab Admin (password) / Pendataan (PIN, petugas pendataan data master)
+  var mode = 'admin';
+  App.$$('#loginAdmin [data-login]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      mode = b.dataset.login;
+      App.$$('#loginAdmin [data-login]').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+      var pinMode = mode !== 'admin';
+      App.$('#lblSecret').textContent = pinMode ? 'PIN' : 'Password';
+      form.password.setAttribute('inputmode', pinMode ? 'numeric' : 'text');
+      form.username.placeholder = { pendataan: 'username petugas pendataan', fasilitator: 'username fasilitator' }[mode] || 'mis. admin';
+      err.textContent = '';
+    });
+  });
+  // Datang dari tab "Pendataan" di halaman petugas → langsung pilih tab Pendataan.
+  var pre = document.body.dataset.login;
+  if (pre === 'pendataan' || pre === 'fasilitator') App.$('#loginAdmin [data-login="' + pre + '"]').click();
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    err.textContent = '';
+    var u = form.username.value.trim(), p = form.password.value;
+    if (!u || !p) { err.textContent = mode !== 'admin' ? 'Isi username dan PIN.' : 'Isi username dan password.'; return; }
+    var btn = form.querySelector('button[type=submit]');
+    App.busy(btn, App.call({ pendataan: 'loginPendataan', fasilitator: 'loginFasilitator' }[mode] || 'loginAdmin', u, p)).then(function (s) {
+      App.saveSession(s);
+      form.reset();
+      App.toast('Selamat datang, ' + s.nama, 'ok');
+      if (App.onLoggedIn) App.onLoggedIn(s);
+    }).catch(function (e2) { err.textContent = e2.message; });
+  });
+})();
+</script>

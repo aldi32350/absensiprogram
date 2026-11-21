@@ -1,0 +1,6 @@
+.git
+dev/.data
+data
+node_modules
+*.md
+deploy.sh

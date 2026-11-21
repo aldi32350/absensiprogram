@@ -1,0 +1,399 @@
+<!-- rekap.html — rekap per sesi / program / jamaah / petugas, koreksi absensi, export CSV/Excel/PDF/Drive -->
+<section id="view-rekap" hidden>
+  <div class="seg rk-tabs" role="tablist">
+    <button data-rt="sesi" aria-pressed="true"><i data-lucide="calendar-check"></i>Per Sesi</button>
+    <button data-rt="program"><i data-lucide="calendar-range"></i>Per Program</button>
+    <button data-rt="jamaah"><i data-lucide="user"></i>Per Jamaah</button>
+    <button data-rt="petugas"><i data-lucide="badge-check"></i>Per Petugas</button>
+  </div>
+
+  <div class="toolbar" id="rkFilter">
+    <select class="input" id="rkProgram" data-for="sesi program"></select>
+    <select class="input" id="rkSesi" data-for="sesi" style="flex:1 1 260px;max-width:360px"></select>
+    <div class="input-wrap search" data-for="jamaah">
+      <i data-lucide="search"></i>
+      <input class="input" id="rkJamaah" list="rkJamaahList" placeholder="Ketik nama / ID jamaah…" autocomplete="off">
+      <datalist id="rkJamaahList"></datalist>
+    </div>
+    <label class="rk-date" data-for="program jamaah petugas"><span>Dari</span><input class="input" type="date" id="rkDari"></label>
+    <label class="rk-date" data-for="program jamaah petugas"><span>Sampai</span><input class="input" type="date" id="rkSampai"></label>
+    <button class="btn primary" id="rkGo"><i data-lucide="refresh-cw"></i> Tampilkan</button>
+  </div>
+
+  <div id="rkOut"><div class="card empty">Pilih filter lalu tekan <b>Tampilkan</b>.</div></div>
+</section>
+
+<script>
+(function () {
+  var $ = App.$;
+  var LIB = {
+    xlsx: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+    jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    autotable: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'
+  };
+  var S = { tab: 'sesi', meta: null, sesiList: [], title: '', tables: [], last: null };
+
+  /* ---------------- Util tampilan ---------------- */
+  function pctCell(p) {
+    var w = Math.max(0, Math.min(100, p));
+    return '<div class="pctcell"><div class="pbar"><i style="width:' + w + '%"></i></div><b>' + p + '%</b></div>';
+  }
+  function stat(label, value, cls, icon) {
+    return '<div class="kstat ' + (cls || '') + '"><div class="ic"><i data-lucide="' + icon + '"></i></div><div class="l">' + label + '</div><div class="v">' + value + '</div></div>';
+  }
+  function table(title, headHtml, bodyHtml, note) {
+    return '<div class="card panel"><div class="panel-head"><h2>' + title + '</h2>' + (note ? '<span class="dim">' + note + '</span>' : '') + '</div>' +
+      '<div class="table-wrap" style="box-shadow:none;border-radius:12px"><table class="table"><thead><tr>' + headHtml + '</tr></thead><tbody>' + bodyHtml + '</tbody></table></div></div>';
+  }
+  function th(list) { return list.map(function (h) { return '<th' + (h[1] ? ' style="text-align:' + h[1] + '"' : '') + '>' + h[0] + '</th>'; }).join(''); }
+  function badge(st) { return st === 'Belum tercatat' ? '<span class="badge">Belum tercatat</span>' : App.statusBadge(st); }
+  function fmtTgl(t) { return t ? App.tgl(t) : ''; }
+
+  /* ---------------- Meta & filter ---------------- */
+  function loadMeta() {
+    return App.api('rekapMeta').then(function (m) {
+      S.meta = m;
+      var cur = $('#rkProgram').value;
+      $('#rkProgram').innerHTML = m.programs.map(function (p) {
+        return '<option value="' + App.esc(p.id) + '">' + App.esc(p.nama) + (p.status !== 'Aktif' ? ' (selesai)' : '') + '</option>';
+      }).join('');
+      if (cur) $('#rkProgram').value = cur;
+      $('#rkJamaahList').innerHTML = m.jamaah.map(function (j) {
+        return '<option value="' + App.esc(j[1] + ' · ' + j[0]) + '">' + App.esc((j[2] || '') + (j[3] !== 'Aktif' ? ' · nonaktif' : '')) + '</option>';
+      }).join('');
+      return loadSesiOptions();
+    });
+  }
+  function loadSesiOptions() {
+    var pid = $('#rkProgram').value;
+    if (!pid) { $('#rkSesi').innerHTML = ''; return Promise.resolve(); }
+    return App.api('listSesi', pid).then(function (d) {
+      S.sesiList = d.rows;
+      $('#rkSesi').innerHTML = d.rows.length ? d.rows.map(function (s) {
+        return '<option value="' + App.esc(s.id_sesi) + '">' + App.esc(App.tgl(s.tanggal, true) + (s.jam_mulai ? ' · ' + s.jam_mulai : '') + ' · ' + s.status + ' · ' + s.hadir + ' hadir') + '</option>';
+      }).join('') : '<option value="">Belum ada sesi</option>';
+    });
+  }
+  function syncFilter() {
+    App.$$('#rkFilter [data-for]').forEach(function (el) { el.hidden = el.dataset.for.split(' ').indexOf(S.tab) === -1; });
+    App.$$('.rk-tabs [data-rt]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.rt === S.tab)); });
+  }
+  function jamaahIdFromInput() {
+    var v = $('#rkJamaah').value.trim();
+    var m = v.match(/·\s*([A-Z0-9][A-Z0-9\-]{3,19})\s*$/i);
+    if (m) return m[1].toUpperCase();
+    var q = App.norm(v);
+    var hit = (S.meta ? S.meta.jamaah : []).filter(function (j) { return App.norm(j[1]) === q; });
+    return hit.length === 1 ? hit[0][0] : '';
+  }
+
+  /* ---------------- Render per tab ---------------- */
+  function run() {
+    var p;
+    if (S.tab === 'sesi') {
+      var sid = $('#rkSesi').value;
+      if (!sid) return App.toast('Pilih sesi dulu.', 'warn');
+      p = App.api('rekapSesi', sid).then(renderSesi);
+    } else if (S.tab === 'program') {
+      if (!$('#rkProgram').value) return App.toast('Pilih program dulu.', 'warn');
+      p = App.api('rekapProgram', $('#rkProgram').value, $('#rkDari').value, $('#rkSampai').value).then(renderProgram);
+    } else if (S.tab === 'jamaah') {
+      var jid = jamaahIdFromInput();
+      if (!jid) return App.toast('Pilih jamaah dari daftar saran.', 'warn');
+      p = App.api('rekapJamaah', jid, $('#rkDari').value, $('#rkSampai').value).then(renderJamaah);
+    } else {
+      p = App.api('rekapPetugas', $('#rkDari').value, $('#rkSampai').value).then(renderPetugas);
+    }
+    App.busy($('#rkGo'), p).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function renderSesi(d) {
+    S.last = d;
+    var r = d.ringkas, s = d.sesi;
+    S.title = 'Rekap Sesi ' + d.program.nama_program + ' ' + s.tanggal;
+    Admin.setSubtitle(d.program.nama_program + ' · ' + App.tgl(s.tanggal, true) + (s.jam_mulai ? ' · ' + s.jam_mulai : '') + ' · ' + s.status);
+    var body = d.rows.map(function (x) {
+      var act = x.id_absensi
+        ? '<button class="btn" data-edit="' + App.esc(x.id_absensi) + '" title="Koreksi status"><i data-lucide="pencil"></i></button>' +
+          '<button class="btn" data-del="' + App.esc(x.id_absensi) + '" title="Hapus data"><i data-lucide="trash-2"></i></button>'
+        : '<button class="btn sm" data-mark="' + App.esc(x.id_jamaah) + '" style="width:auto;padding:0 10px">Tandai</button>';
+      return '<tr><td><b>' + App.esc(x.nama) + '</b><div class="dim mono">' + App.esc(x.id_jamaah) + (x.peserta ? '' : ' · tamu') + '</div></td>' +
+        '<td class="hide-sm-col">' + App.esc(x.kelompok || '') + '</td><td>' + badge(x.status) + '</td>' +
+        '<td class="mono">' + App.esc(App.jam(x.waktu)) + '</td>' +
+        '<td class="mono">' + (x.selesai ? App.esc(App.jam(x.selesai)) + ' 🎁' : '<span class="dim">–</span>') + '</td>' +
+        '<td class="hide-sm-col">' + App.esc(x.metode) + '</td>' +
+        '<td class="hide-sm-col">' + App.esc(x.petugas) + '</td><td class="hide-sm-col dim">' + App.esc(x.keterangan) + '</td>' +
+        '<td><div class="actions">' + act + '</div></td></tr>';
+    }).join('');
+    $('#rkOut').innerHTML =
+      '<div class="stats">' +
+        stat('Hadir', r.Hadir + '<small>/' + r.peserta + '</small>', 'hero', 'check') +
+        stat('Persentase hadir', r.pct + '%', '', 'percent') +
+        stat('Selesai · dapat hadiah 🎁', r.Selesai + '<small>/' + r.Hadir + ' hadir</small>', 'gold', 'gift') +
+        stat('Izin / Sakit / Alpa / belum', r.Izin + ' / ' + r.Sakit + ' / ' + r.Alpa + ' / ' + r.Belum, (r.Alpa + r.Belum) ? 'bad' : '', 'x') +
+      '</div>' +
+      table('Daftar hadir & tidak hadir', th([['Nama'], ['Desa'], ['Status'], ['Jam hadir'], ['Selesai'], ['Metode'], ['Petugas'], ['Keterangan'], ['Aksi', 'right']]),
+        body || '<tr><td colspan="8" class="empty">Tidak ada data.</td></tr>', d.rows.length + ' orang');
+    S.tables = [{
+      name: 'Sesi ' + s.tanggal,
+      headers: ['ID Jamaah', 'Nama', 'Desa', 'Peserta', 'Status', 'Waktu Hadir', 'Waktu Selesai', 'Hadiah', 'Metode', 'Petugas', 'Keterangan'],
+      rows: d.rows.map(function (x) { return [x.id_jamaah, x.nama, x.kelompok, x.peserta ? 'Ya' : 'Tamu', x.status, x.waktu, x.selesai || '', x.hadiah || '', x.metode, x.petugas, x.keterangan]; })
+    }];
+    App.icons();
+  }
+
+  function renderProgram(d) {
+    S.last = d;
+    var r = d.ringkas;
+    S.title = 'Rekap Program ' + d.program.nama_program + ' ' + d.range.dari + ' sd ' + d.range.sampai;
+    Admin.setSubtitle(d.program.nama_program + ' · ' + App.tgl(d.range.dari) + ' – ' + App.tgl(d.range.sampai));
+    var sesiBody = d.sesi.map(function (s) {
+      return '<tr><td><b>' + App.esc(App.tgl(s.tanggal, true)) + '</b><div class="dim">' + App.esc(s.jam_mulai || '') + '</div></td>' +
+        '<td class="mono">' + s.Hadir + ' / ' + s.peserta + '</td><td class="mono">' + (s.Selesai || 0) + ' 🎁</td><td class="mono hide-sm-col">' + s.Izin + '</td><td class="mono hide-sm-col">' + s.Sakit + '</td>' +
+        '<td class="mono hide-sm-col">' + s.Alpa + '</td><td class="mono hide-sm-col">' + s.Belum + '</td><td>' + pctCell(s.pct) + '</td><td>' + App.statusBadge(s.status) + '</td></tr>';
+    }).join('');
+    var jBody = d.jamaah.map(function (j) {
+      return '<tr><td><b>' + App.esc(j.nama) + '</b><div class="dim mono">' + App.esc(j.id_jamaah) + (j.peserta ? '' : ' · tamu') + '</div></td>' +
+        '<td class="hide-sm-col">' + App.esc(j.kelompok || '') + '</td><td class="mono">' + j.Hadir + ' / ' + j.sesi + '</td>' +
+        '<td class="mono hide-sm-col">' + j.Izin + '</td><td class="mono hide-sm-col">' + j.Sakit + '</td><td class="mono hide-sm-col">' + (j.Alpa + j.Belum) + '</td><td>' + pctCell(j.pct) + '</td></tr>';
+    }).join('');
+    $('#rkOut').innerHTML =
+      '<div class="stats">' +
+        stat('Jumlah sesi', r.sesi, 'hero', 'calendar-days') +
+        stat('Rata-rata kehadiran', r.rata + '%', '', 'percent') +
+        stat('Rata-rata hadir / sesi', r.rataHadir + '<small> org</small>', 'gold', 'users') +
+        stat('Peserta program', r.peserta, '', 'user-check') +
+      '</div>' +
+      table('Kehadiran per sesi', th([['Tanggal'], ['Hadir'], ['Selesai'], ['Izin'], ['Sakit'], ['Alpa'], ['Belum'], ['% Hadir'], ['Status']]),
+        sesiBody || '<tr><td colspan="8" class="empty">Tidak ada sesi pada periode ini.</td></tr>') +
+      table('Persentase kehadiran per jamaah', th([['Nama'], ['Desa'], ['Hadir'], ['Izin'], ['Sakit'], ['Alpa'], ['% Hadir']]),
+        jBody || '<tr><td colspan="7" class="empty">Tidak ada data.</td></tr>', 'dihitung dari sesi setelah tanggal daftar');
+    S.tables = [
+      { name: 'Per Sesi', headers: ['Tanggal', 'Jam', 'Peserta', 'Hadir', 'Selesai (hadiah)', 'Izin', 'Sakit', 'Alpa', 'Belum tercatat', '% Hadir', 'Status'],
+        rows: d.sesi.map(function (s) { return [s.tanggal, s.jam_mulai, s.peserta, s.Hadir, s.Selesai || 0, s.Izin, s.Sakit, s.Alpa, s.Belum, s.pct, s.status]; }) },
+      { name: 'Per Jamaah', headers: ['ID Jamaah', 'Nama', 'Desa', 'Peserta', 'Jumlah Sesi', 'Hadir', 'Izin', 'Sakit', 'Alpa', 'Belum tercatat', '% Hadir'],
+        rows: d.jamaah.map(function (j) { return [j.id_jamaah, j.nama, j.kelompok, j.peserta ? 'Ya' : 'Tamu', j.sesi, j.Hadir, j.Izin, j.Sakit, j.Alpa, j.Belum, j.pct]; }) }
+    ];
+    App.icons();
+  }
+
+  function renderJamaah(d) {
+    S.last = d;
+    var j = d.jamaah;
+    S.title = 'Rekap Jamaah ' + j.nama + ' ' + d.range.dari + ' sd ' + d.range.sampai;
+    Admin.setSubtitle(j.nama + ' · ' + j.id_jamaah + ' · ' + App.tgl(d.range.dari) + ' – ' + App.tgl(d.range.sampai));
+    var tot = { s: 0, h: 0 };
+    d.perProgram.forEach(function (p) { tot.s += p.sesi; tot.h += p.Hadir; });
+    var pBody = d.perProgram.map(function (p) {
+      return '<tr><td><b>' + App.esc(p.nama_program) + '</b>' + (p.peserta ? '' : ' <span class="chip">tamu</span>') + '</td>' +
+        '<td class="mono">' + p.Hadir + ' / ' + p.sesi + '</td><td class="mono hide-sm-col">' + p.Izin + '</td><td class="mono hide-sm-col">' + p.Sakit + '</td>' +
+        '<td class="mono hide-sm-col">' + (p.Alpa + p.Belum) + '</td><td>' + pctCell(p.pct) + '</td></tr>';
+    }).join('');
+    var hBody = d.riwayat.map(function (x) {
+      return '<tr><td>' + App.esc(App.tgl(x.tanggal, true)) + '</td><td>' + App.esc(x.nama_program) + '</td><td>' + App.statusBadge(x.status) + '</td>' +
+        '<td class="mono">' + App.esc(App.jam(x.waktu)) + '</td><td class="hide-sm-col">' + App.esc(x.metode) + ' · ' + App.esc(x.petugas) + '</td>' +
+        '<td><div class="actions"><button class="btn" data-edit="' + App.esc(x.id_absensi) + '" title="Koreksi"><i data-lucide="pencil"></i></button>' +
+        '<button class="btn" data-del="' + App.esc(x.id_absensi) + '" title="Hapus"><i data-lucide="trash-2"></i></button></div></td></tr>';
+    }).join('');
+    $('#rkOut').innerHTML =
+      '<div class="stats">' +
+        stat('Kehadiran total', (tot.s ? Math.round(tot.h / tot.s * 1000) / 10 : 0) + '%', 'hero', 'percent') +
+        stat('Hadir', tot.h + '<small>/' + tot.s + ' sesi</small>', '', 'check') +
+        stat('Desa', App.esc(j.kelompok || '–'), 'gold', 'users') +
+        stat('Status', App.esc(j.status), j.status === 'Aktif' ? '' : 'bad', 'user') +
+      '</div>' +
+      table('Persentase per program', th([['Program'], ['Hadir'], ['Izin'], ['Sakit'], ['Alpa'], ['% Hadir']]),
+        pBody || '<tr><td colspan="6" class="empty">Tidak ada program.</td></tr>') +
+      table('Riwayat absensi', th([['Tanggal'], ['Program'], ['Status'], ['Jam'], ['Metode · Petugas'], ['Aksi', 'right']]),
+        hBody || '<tr><td colspan="6" class="empty">Belum ada riwayat pada periode ini.</td></tr>');
+    S.tables = [
+      { name: 'Per Program', headers: ['Program', 'Peserta', 'Jumlah Sesi', 'Hadir', 'Izin', 'Sakit', 'Alpa', 'Belum tercatat', '% Hadir'],
+        rows: d.perProgram.map(function (p) { return [p.nama_program, p.peserta ? 'Ya' : 'Tamu', p.sesi, p.Hadir, p.Izin, p.Sakit, p.Alpa, p.Belum, p.pct]; }) },
+      { name: 'Riwayat', headers: ['Tanggal', 'Program', 'Status', 'Waktu', 'Metode', 'Petugas', 'Keterangan'],
+        rows: d.riwayat.map(function (x) { return [x.tanggal, x.nama_program, x.status, x.waktu, x.metode, x.petugas, x.keterangan]; }) }
+    ];
+    App.icons();
+  }
+
+  function renderPetugas(d) {
+    S.last = d;
+    S.title = 'Rekap Petugas ' + d.range.dari + ' sd ' + d.range.sampai;
+    Admin.setSubtitle('Semua petugas · ' + App.tgl(d.range.dari) + ' – ' + App.tgl(d.range.sampai));
+    var total = 0, kamera = 0, scanner = 0, manual = 0;
+    d.rows.forEach(function (x) { total += x.total; kamera += x.kamera; scanner += x.scanner; manual += x.manual; });
+    var body = d.rows.map(function (x) {
+      return '<tr><td><b>' + App.esc(x.nama) + '</b><div class="dim mono">' + App.esc(x.username || x.id) + '</div></td>' +
+        '<td class="mono"><b>' + x.total + '</b></td><td class="mono hide-sm-col">' + x.kamera + '</td><td class="mono hide-sm-col">' + x.scanner + '</td>' +
+        '<td class="mono hide-sm-col">' + x.manual + '</td><td class="mono hide-sm-col">' + x.otomatis + '</td><td class="mono">' + x.sesi + '</td>' +
+        '<td class="hide-sm-col">' + (x.terakhir ? App.esc(App.tgl(x.terakhir) + ' ' + App.jam(x.terakhir)) : '–') + '</td></tr>';
+    }).join('');
+    $('#rkOut').innerHTML =
+      '<div class="stats">' +
+        stat('Total data dicatat', total, 'hero', 'list-checks') +
+        stat('Scan kamera', kamera, '', 'camera') +
+        stat('Scanner', scanner, 'gold', 'scan-line') +
+        stat('Input manual', manual, '', 'keyboard') +
+      '</div>' +
+      table('Jumlah scan per petugas', th([['Petugas'], ['Total'], ['Kamera'], ['Scanner'], ['Manual'], ['Alpa otomatis'], ['Sesi'], ['Terakhir aktif']]),
+        body || '<tr><td colspan="8" class="empty">Tidak ada data.</td></tr>');
+    S.tables = [{ name: 'Per Petugas', headers: ['ID', 'Nama', 'Username', 'Total', 'Scan Kamera', 'Scanner', 'Manual', 'Alpa Otomatis', 'Jumlah Sesi', 'Terakhir Aktif'],
+      rows: d.rows.map(function (x) { return [x.id, x.nama, x.username, x.total, x.kamera, x.scanner, x.manual, x.otomatis, x.sesi, x.terakhir]; }) }];
+    App.icons();
+  }
+
+  /* ---------------- Koreksi absensi ---------------- */
+  var STATUS_OPTS = '<option>Hadir</option><option>Izin</option><option>Sakit</option><option>Alpa</option>';
+  function findRow(idAbs) {
+    var list = S.tab === 'sesi' ? S.last.rows : S.last.riwayat;
+    return list.filter(function (x) { return x.id_absensi === idAbs; })[0] || {};
+  }
+  function koreksi(idAbs) {
+    var x = findRow(idAbs);
+    App.formModal({
+      title: 'Koreksi absensi' + (x.nama ? ' · ' + x.nama : ''),
+      values: { status: x.status, keterangan: '' },
+      html: '<p class="muted" style="margin:0">Data saat ini: <b>' + App.esc(x.status) + '</b>' + (x.waktu ? ' jam ' + App.esc(App.jam(x.waktu)) : '') + '. Perubahan dicatat di LOG.</p>' +
+        '<label class="field"><span>Status baru</span><select class="input" name="status">' + STATUS_OPTS + '</select></label>' +
+        '<label class="field"><span>Alasan / keterangan</span><input class="input" name="keterangan" placeholder="mis. Ada surat izin"></label>',
+      onSubmit: function (v) {
+        if (v.status === x.status && !v.keterangan) throw new Error('Tidak ada perubahan.');
+        return App.api('koreksiAbsensi', idAbs, v.status, v.keterangan);
+      }
+    }).then(function (r) { if (r) { App.toast('Absensi dikoreksi', 'ok'); run(); } });
+  }
+  function hapus(idAbs) {
+    var x = findRow(idAbs);
+    App.confirm('Hapus data absensi?', (x.nama || '') + ' (' + x.status + ') akan dihapus dari sesi ini. Tindakan dicatat di LOG.', 'Hapus', true)
+      .then(function (ok) {
+        if (!ok) return;
+        App.loading(true);
+        App.api('hapusAbsensi', idAbs).then(function () { App.toast('Data dihapus', 'ok'); run(); })
+          .catch(function (e) { App.toast(e.message, 'err'); }).finally(function () { App.loading(false); });
+      });
+  }
+  function tandai(idJ) {
+    var x = S.last.rows.filter(function (r) { return r.id_jamaah === idJ; })[0];
+    App.formModal({
+      title: 'Catat absensi · ' + x.nama,
+      values: { status: 'Hadir', keterangan: '' },
+      html: '<label class="field"><span>Status</span><select class="input" name="status">' + STATUS_OPTS + '</select></label>' +
+        '<label class="field"><span>Keterangan</span><input class="input" name="keterangan" placeholder="mis. Lupa scan"></label>',
+      onSubmit: function (v) { return App.api('tandaiAbsensiAdmin', S.last.sesi.id_sesi, idJ, v.status, v.keterangan); }
+    }).then(function (r) { if (r) { App.toast('Absensi dicatat', 'ok'); run(); } });
+  }
+  $('#rkOut').addEventListener('click', function (e) {
+    var b;
+    if ((b = e.target.closest('[data-edit]'))) koreksi(b.dataset.edit);
+    else if ((b = e.target.closest('[data-del]'))) hapus(b.dataset.del);
+    else if ((b = e.target.closest('[data-mark]'))) tandai(b.dataset.mark);
+  });
+
+  /* ---------------- Export ---------------- */
+  function fname(ext) { return S.title.replace(/[^\w\- ]+/g, '').replace(/\s+/g, '_') + '.' + ext; }
+  function need() { if (!S.tables.length) { App.toast('Tampilkan rekap dulu.', 'warn'); return false; } return true; }
+  function csvCell(v) { v = v === null || v === undefined ? '' : String(v); return /[",\n;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+
+  function exportCsv() {
+    if (!need()) return;
+    var out = S.tables.map(function (t) {
+      return (S.tables.length > 1 ? csvCell(t.name) + '\n' : '') + [t.headers].concat(t.rows).map(function (r) { return r.map(csvCell).join(','); }).join('\n');
+    }).join('\n\n');
+    App.download(fname('csv'), out);
+  }
+  function exportXlsx(btn) {
+    if (!need()) return;
+    App.busy(btn, App.loadScript(LIB.xlsx).then(function () {
+      var wb = XLSX.utils.book_new();
+      S.tables.forEach(function (t) {
+        var ws = XLSX.utils.aoa_to_sheet([t.headers].concat(t.rows));
+        ws['!cols'] = t.headers.map(function (h, i) {
+          var w = String(h).length;
+          t.rows.forEach(function (r) { w = Math.max(w, String(r[i] === undefined ? '' : r[i]).length); });
+          return { wch: Math.min(40, w + 2) };
+        });
+        XLSX.utils.book_append_sheet(wb, ws, t.name.substring(0, 31));
+      });
+      XLSX.writeFile(wb, fname('xlsx'));
+    })).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+  function exportPdf(btn) {
+    if (!need()) return;
+    App.busy(btn, App.loadScript(LIB.jspdf).then(function () { return App.loadScript(LIB.autotable); }).then(function () {
+      var doc = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      doc.setFontSize(14); doc.text(S.title, 14, 15);
+      doc.setFontSize(9); doc.setTextColor(100); doc.text('Dicetak ' + App.nowStr() + ' · Absensi Jamaah', 14, 21);
+      var y = 26;
+      S.tables.forEach(function (t, i) {
+        if (S.tables.length > 1) { doc.setFontSize(11); doc.setTextColor(6, 78, 59); doc.text(t.name, 14, y + 4); y += 6; }
+        doc.autoTable({
+          head: [t.headers], body: t.rows, startY: y, margin: { left: 14, right: 14 },
+          styles: { fontSize: 8, cellPadding: 1.8 }, headStyles: { fillColor: [6, 95, 70], textColor: 255 },
+          alternateRowStyles: { fillColor: [240, 253, 244] }
+        });
+        y = doc.lastAutoTable.finalY + 10;
+        if (i < S.tables.length - 1 && y > 170) { doc.addPage(); y = 15; }
+      });
+      doc.save(fname('pdf'));
+    })).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+  function exportDrive(btn) {
+    if (!need()) return;
+    App.busy(btn, App.api('exportKeDrive', S.title, S.tables)).then(function (r) {
+      App.modal({
+        title: 'Tersimpan di Google Drive',
+        html: '<p class="muted">Folder <b>Rekap Absensi Jamaah</b> di Drive Anda.</p>' +
+          '<div class="stack"><a class="btn primary block" target="_blank" rel="noopener" href="' + App.esc(r.sheetUrl) + '"><i data-lucide="sheet"></i> Buka Google Sheets</a>' +
+          '<a class="btn block" target="_blank" rel="noopener" href="' + App.esc(r.pdfUrl) + '"><i data-lucide="file-text"></i> Buka PDF</a></div>',
+        okText: 'Tutup', cancelText: false
+      });
+    }).catch(function (e) { App.toast(e.message, 'err', 5000); });
+  }
+
+  /* ---------------- Event ---------------- */
+  App.$$('.rk-tabs [data-rt]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      S.tab = b.dataset.rt; S.tables = []; syncFilter();
+      $('#rkOut').innerHTML = '<div class="card empty">Pilih filter lalu tekan <b>Tampilkan</b>.</div>';
+      Admin.setSubtitle('Rekap kehadiran & export laporan');
+      if (S.tab === 'petugas') run();
+    });
+  });
+  $('#rkProgram').addEventListener('change', function () { loadSesiOptions().then(function () { if (S.tab === 'sesi') run(); }); });
+  $('#rkSesi').addEventListener('change', run);
+  $('#rkGo').addEventListener('click', run);
+  $('#rkJamaah').addEventListener('change', function () { if (jamaahIdFromInput()) run(); });
+
+  var t = App.today();
+  $('#rkDari').value = t.substring(0, 8) + '01';
+  $('#rkSampai').value = t;
+
+  Admin.register('rekap', {
+    title: 'Rekap & Laporan', nav: 'Rekap & Laporan', icon: 'chart-column',
+    subtitle: 'Rekap kehadiran & export laporan',
+    actions: [
+      { label: 'CSV', icon: 'file-text', onClick: exportCsv },
+      { label: 'Excel', icon: 'file-spreadsheet', onClick: exportXlsx },
+      { label: 'PDF', icon: 'file-down', onClick: exportPdf },
+      { label: 'Simpan ke Drive', icon: 'hard-drive-upload', cls: 'primary', onClick: exportDrive }
+    ],
+    show: function (arg) {
+      syncFilter();
+      App.loading(true);
+      loadMeta().then(function () {
+        if (arg && arg.jamaah) {                       // dari Detail Jamaah → langsung rekap per jamaah
+          S.tab = 'jamaah'; syncFilter();
+          $('#rkJamaah').value = (arg.nama || '') + ' · ' + arg.jamaah;
+          $('#rkDari').value = '';
+          return run();
+        }
+        if (arg && arg.sesi) {
+          S.tab = 'sesi'; syncFilter();
+          $('#rkProgram').value = arg.program;
+          return loadSesiOptions().then(function () { $('#rkSesi').value = arg.sesi; run(); });
+        }
+        if (S.tab === 'sesi' && $('#rkSesi').value) run();
+      }).catch(function (e) { App.toast(e.message, 'err'); }).finally(function () { App.loading(false); });
+    }
+  });
+})();
+</script>

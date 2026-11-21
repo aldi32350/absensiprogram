@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="apple-mobile-web-app-title" content="Absensi">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script>
+    try { var th = JSON.parse(localStorage.getItem('absensi_theme') || '""'); if (th !== 'dark' && th !== 'light') th = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.setAttribute('data-theme', th); } catch (e) {}
+  </script>
+  <?!= include('styles') ?>
+</head>
+<body class="theme-kk auth-on" data-app-url="<?= appUrl ?>">
+  <div class="blobs" aria-hidden="true"><span></span><span></span><span></span></div>
+  <?!= include('scripts') ?>
+
+  <?!= include('login-petugas') ?>
+  <?!= include('absensi') ?>
+
+  <script>
+  (function () {
+    // Login memakai tema panel (terang/gelap); aplikasi scan memakai tema kaca hijau.
+    function showLogin() {
+      if (window.Petugas) Petugas.stop();
+      document.body.classList.add('theme-kk', 'auth-on');
+      App.$('#loginPetugas').hidden = false;
+      if (App.focusLoginPetugas) App.focusLoginPetugas();
+    }
+    function showApp() {
+      document.body.classList.remove('theme-kk', 'auth-on');
+      App.$('#loginPetugas').hidden = true;
+      Petugas.start();
+    }
+    App.showLogin = showLogin;
+    App.onLoggedIn = showApp;
+
+    App.loading(true);
+    App.restoreSession('petugas').then(function (s) {
+      App.loading(false);
+      if (s) showApp(); else showLogin();
+    });
+  })();
+  </script>
+</body>
+</html>

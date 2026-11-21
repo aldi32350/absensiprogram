@@ -1,0 +1,280 @@
+<!-- dashboard.html — ringkasan admin (grafik tren dibuat di tahap f) -->
+<section id="view-dashboard" hidden>
+  <div class="greet">
+    <h2 id="dashGreeting">Selamat datang</h2>
+    <p id="dashNote">Memuat ringkasan…</p>
+  </div>
+
+  <div class="profil-cta" id="dashProfilCta" hidden>
+    <i data-lucide="building-2"></i>
+    <div class="grow"><b>Lengkapi profil yayasan</b><span>Isi nama yayasan &amp; unggah logo — otomatis dipakai di kartu jamaah, halaman login, dan laporan.</span></div>
+    <button class="btn primary sm" data-go="profil">Isi sekarang</button>
+  </div>
+
+  <div class="toolbar dash-filter">
+    <select class="input" id="dfProgram"><option value="">Semua program</option></select>
+    <label class="rk-date"><span>Dari</span><input class="input" type="date" id="dfDari"></label>
+    <label class="rk-date"><span>Sampai</span><input class="input" type="date" id="dfSampai"></label>
+    <div class="seg dash-preset" role="group" aria-label="Rentang cepat">
+      <button type="button" data-preset="all">Semua</button>
+      <button type="button" data-preset="month">Bulan ini</button>
+      <button type="button" data-preset="30">30 hari</button>
+      <button type="button" data-preset="90">3 bulan</button>
+    </div>
+    <span class="dim" id="dfInfo"></span>
+  </div>
+
+  <div class="stats stats-5">
+    <button type="button" class="kstat hero" data-kat="semua">
+      <div class="ic"><i data-lucide="users"></i></div>
+      <div class="l">Total Jamaah</div>
+      <div class="v" id="kTotal">–</div>
+      <div class="l" id="kTotalSub">tercatat di database</div>
+    </button>
+    <button type="button" class="kstat" data-kat="aktif">
+      <div class="ic"><i data-lucide="user-check"></i></div>
+      <div class="l">Jamaah Aktif</div>
+      <div class="v" id="kAktif">–</div>
+      <div class="l" id="kAktifSub">≥ 3× pertemuan</div>
+    </button>
+    <button type="button" class="kstat gold" data-kat="sedang">
+      <div class="ic"><i data-lucide="user-round"></i></div>
+      <div class="l">Jamaah Sedang</div>
+      <div class="v" id="kSedang">–</div>
+      <div class="l" id="kSedangSub">1–2× pertemuan</div>
+    </button>
+    <button type="button" class="kstat" data-kat="tidak" id="kTidakBox">
+      <div class="ic"><i data-lucide="user-x"></i></div>
+      <div class="l">Tidak Aktif</div>
+      <div class="v" id="kTidak">–</div>
+      <div class="l" id="kTidakSub">0× hadir</div>
+    </button>
+    <div class="kstat">
+      <div class="ic"><i data-lucide="chart-line"></i></div>
+      <div class="l">Rata-rata Hadir</div>
+      <div class="v" id="kRata">–</div>
+      <div class="l" id="kRataSub">per pertemuan (tanggal)</div>
+    </div>
+  </div>
+
+  <div class="grid-3-1">
+    <div class="card panel">
+      <div class="panel-head"><h2>Sesi hari ini</h2><button class="link" data-go="program">Kelola program</button></div>
+      <div class="dlist" id="dashToday"></div>
+    </div>
+    <div class="card panel">
+      <div class="panel-head"><h2>Perlu ditutup</h2></div>
+      <div class="dlist" id="dashStale"></div>
+    </div>
+  </div>
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Tren kehadiran per program</h2><span class="dim">% hadir dari peserta · sesi yang sudah ditutup (mengikuti filter)</span></div>
+    <div class="chart-legend" id="trenLegend"></div>
+    <div class="chart-box"><canvas id="trenChart" aria-label="Grafik tren persentase kehadiran per program" role="img"></canvas></div>
+    <div id="trenEmpty" class="empty" hidden>Belum ada sesi untuk digambarkan.</div>
+  </div>
+</section>
+
+<script>
+(function () {
+  var BLN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  function dbox(ymd) {
+    var p = String(ymd).split('-');
+    return '<div class="dbox"><b>' + (+p[2]) + '</b><span>' + BLN[+p[1] - 1] + '</span></div>';
+  }
+  function salam() {
+    var h = new Date().getHours();
+    return h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam';
+  }
+  /* ---------- Grafik tren (Chart.js) ---------- */
+  var CHART_URL = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+  // Palet kategorikal tervalidasi (urutan tetap, tidak diputar ulang); terang & gelap masing-masing.
+  var SERIES = {
+    light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'],
+    dark:  ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c']
+  };
+  var chart = null, lastTren = null;
+  function cssVar(n) { return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+
+  function drawTren(tren) {
+    lastTren = tren;
+    var box = App.$('#trenChart').parentNode;
+    var has = tren && tren.length;
+    box.hidden = !has; App.$('#trenEmpty').hidden = !!has; App.$('#trenLegend').hidden = !has || tren.length < 2;
+    if (!has) return;
+    var series = tren.slice(0, 6);   // maks. 6 garis agar tetap terbaca
+    App.loadScript(CHART_URL).then(function () {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      var pal = SERIES[dark ? 'dark' : 'light'];
+      var labels = {};
+      series.forEach(function (s) { s.points.forEach(function (p) { labels[p.tanggal] = true; }); });
+      labels = Object.keys(labels).sort();
+      var datasets = series.map(function (s, i) {
+        var by = {}; s.points.forEach(function (p) { by[p.tanggal] = p; });
+        return {
+          label: s.nama_program, borderColor: pal[i], backgroundColor: pal[i],
+          borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointBorderWidth: 2, pointBorderColor: cssVar('--surface'),
+          spanGaps: true, tension: 0.25,
+          data: labels.map(function (t) { return by[t] ? by[t].pct : null; }),
+          _raw: labels.map(function (t) { return by[t] || null; })
+        };
+      });
+      App.$('#trenLegend').innerHTML = series.map(function (s, i) {
+        return '<span><i style="background:' + pal[i] + '"></i>' + App.esc(s.nama_program) + '</span>';
+      }).join('');
+      var ink = cssVar('--muted'), grid = cssVar('--line');
+      if (chart) chart.destroy();
+      chart = new Chart(App.$('#trenChart'), {
+        type: 'line',
+        data: { labels: labels.map(function (t) { return App.tgl(t).replace(/ \d{4}$/, ''); }), datasets: datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: cssVar('--surface'), titleColor: cssVar('--fg'), bodyColor: cssVar('--fg-2'),
+              borderColor: grid, borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
+              callbacks: {
+                label: function (c) {
+                  var r = c.dataset._raw[c.dataIndex];
+                  return ' ' + c.dataset.label + ': ' + c.parsed.y + '%' + (r ? ' (' + r.hadir + '/' + r.peserta + ')' : '');
+                }
+              }
+            }
+          },
+          scales: {
+            y: { min: 0, max: 100, ticks: { color: ink, stepSize: 25, callback: function (v) { return v + '%'; } }, grid: { color: grid }, border: { display: false } },
+            x: { ticks: { color: ink, maxRotation: 0, autoSkip: true }, grid: { display: false }, border: { color: grid } }
+          }
+        }
+      });
+    }).catch(function () { App.$('#trenEmpty').hidden = false; App.$('#trenEmpty').textContent = 'Grafik gagal dimuat (periksa koneksi).'; });
+  }
+  // Ganti tema → gambar ulang dengan warna mode tersebut.
+  new MutationObserver(function () { if (lastTren && Admin.current === 'dashboard') drawTren(lastTren); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  function item(s, showPct) {
+    var pct = s.peserta ? Math.round(s.hadir / s.peserta * 100) : 0;
+    return '<div class="ditem click" data-sesi="' + App.esc(s.id_sesi) + '" data-prog="' + App.esc(s.id_program) + '" title="Lihat rekap sesi">' + dbox(s.tanggal) +
+      '<div class="dt"><b>' + App.esc(s.nama_program) + '</b><small>' + App.esc(s.jam_mulai || '–') +
+        (s.keterangan ? ' · ' + App.esc(s.keterangan) : '') + ' · ' + s.hadir + ' / ' + s.peserta + ' hadir</small></div>' +
+      (showPct ? '<div class="pct" title="' + pct + '%"><i style="width:' + pct + '%"></i></div>' : '') +
+      App.statusBadge(s.status) + '</div>';
+  }
+
+  /* ---------- Filter program & tanggal (diingat di browser) ---------- */
+  var F = App.store.get('dash_filter', { program: '', dari: '', sampai: '' });
+  var lastKpi = null;
+  function setFilterInputs() {
+    App.$('#dfProgram').value = F.program || '';
+    App.$('#dfDari').value = F.dari || '';
+    App.$('#dfSampai').value = F.sampai || '';
+  }
+  function presetDates(p) {
+    var t = App.today();
+    if (p === 'all') return { dari: '', sampai: '' };
+    if (p === 'month') return { dari: t.substring(0, 8) + '01', sampai: t };
+    var d = new Date(); d.setDate(d.getDate() - (+p - 1));
+    return { dari: d.getFullYear() + '-' + App.pad(d.getMonth() + 1) + '-' + App.pad(d.getDate()), sampai: t };
+  }
+  function markPreset() {
+    App.$$('.dash-preset [data-preset]').forEach(function (b) {
+      var r = presetDates(b.dataset.preset);
+      b.setAttribute('aria-pressed', String(r.dari === (F.dari || '') && r.sampai === (F.sampai || '')));
+    });
+  }
+  function applyFilter() {
+    F = { program: App.$('#dfProgram').value, dari: App.$('#dfDari').value, sampai: App.$('#dfSampai').value };
+    App.store.set('dash_filter', F);
+    show();
+  }
+
+  function renderKpi(k, d) {
+    lastKpi = k;
+    ['aktifPct', 'sedangPct', 'tidakPct'].forEach(function (f) { k[f] = String(k[f]).replace('.', ','); });
+    var progName = d.filter.program ? (d.programs.filter(function (p) { return p.id === d.filter.program; })[0] || {}).nama : '';
+    App.$('#kTotal').textContent = k.total;
+    App.$('#kTotalSub').textContent = progName ? 'peserta ' + progName : 'jamaah aktif di database';
+    App.$('#kAktif').textContent = k.aktif;
+    App.$('#kAktifSub').textContent = '≥ ' + k.batas + '× pertemuan (' + k.aktifPct + '%)';
+    App.$('#kSedang').textContent = k.sedang;
+    App.$('#kSedangSub').textContent = '1–' + (k.batas - 1) + '× pertemuan (' + k.sedangPct + '%)';
+    App.$('#kTidak').textContent = k.tidak;
+    App.$('#kTidakSub').textContent = '0× hadir (' + k.tidakPct + '%)';
+    App.$('#kTidakBox').classList.toggle('bad', k.tidak > 0 && k.tidakPct >= 30);
+    App.$('#kRata').textContent = String(k.rataHadir).replace('.', ',');
+    App.$('#kRataSub').textContent = 'per pertemuan (tanggal) · ' + k.pertemuan + ' pertemuan';
+    var rng = d.filter.dari || d.filter.sampai
+      ? (d.filter.dari ? App.tgl(d.filter.dari) : 'awal') + ' – ' + (d.filter.sampai ? App.tgl(d.filter.sampai) : 'hari ini')
+      : 'semua waktu';
+    App.$('#dfInfo').textContent = (progName || 'Semua program') + ' · ' + rng;
+  }
+
+  function showKategori(kat) {
+    if (!lastKpi) return;
+    var title = { semua: 'Semua jamaah', aktif: 'Jamaah aktif', sedang: 'Jamaah sedang', tidak: 'Jamaah tidak aktif (0× hadir)' }[kat];
+    var list = kat === 'semua' ? lastKpi.daftar.aktif.concat(lastKpi.daftar.sedang, lastKpi.daftar.tidak) : lastKpi.daftar[kat];
+    App.modal({
+      title: title + ' · ' + list.length,
+      okText: 'Tutup', cancelText: false,
+      html: '<p class="muted" style="margin:0 0 8px">' + App.esc(App.$('#dfInfo').textContent) + '</p>' +
+        '<div class="table-wrap" style="max-height:60vh;box-shadow:none"><table class="table"><thead><tr><th>No Jamaah</th><th>Nama</th><th>Desa</th><th style="text-align:right">Hadir</th></tr></thead><tbody>' +
+        (list.length ? list.map(function (x) {
+          return '<tr><td class="mono">' + App.esc(x[0]) + '</td><td><b>' + App.esc(x[1]) + '</b></td><td>' + App.esc(x[2] || '–') + '</td><td class="mono" style="text-align:right">' + x[3] + '×</td></tr>';
+        }).join('') : '<tr><td colspan="4" class="empty">Tidak ada.</td></tr>') + '</tbody></table></div>'
+    });
+  }
+
+  function show() {
+    var s = App.session || {};
+    App.$('#dashGreeting').textContent = salam() + ', ' + (s.nama || 'Admin');
+    Admin.setSubtitle(App.tgl(App.today(), true));
+    setFilterInputs(); markPreset();
+    return App.api('getDashboardSummary', F).then(function (d) {
+      var sel = App.$('#dfProgram');
+      sel.innerHTML = '<option value="">Semua program</option>' + d.programs.map(function (p) {
+        return '<option value="' + App.esc(p.id) + '">' + App.esc(p.nama) + (p.status !== 'Aktif' ? ' (selesai)' : '') + '</option>';
+      }).join('');
+      sel.value = d.filter.program || '';
+      renderKpi(d.kpi, d);
+      App.$('#dashNote').innerHTML = d.sesiDibuka
+        ? 'Ada <b>' + d.sesiDibuka + ' sesi dibuka</b> hari ini · ' + d.hadirHariIni + ' jamaah sudah hadir.'
+        : 'Belum ada sesi dibuka hari ini. ' + d.programAktif + ' program aktif.';
+      if (d.jumlahBelumDitutup) App.$('#dashNote').innerHTML += ' <b class="bad">' + d.jumlahBelumDitutup + ' sesi lama</b> belum ditutup.';
+      App.$('#dashToday').innerHTML = d.sesiHariIni.length ? d.sesiHariIni.map(function (x) { return item(x, true); }).join('')
+        : '<div class="empty">Tidak ada sesi hari ini.<br><button class="btn primary sm" data-go="program" style="margin-top:10px">Buka sesi di menu Program</button></div>';
+      App.$('#dashStale').innerHTML = d.belumDitutup.length ? d.belumDitutup.map(function (x) { return item(x, false); }).join('')
+        : '<div class="empty">Semua sesi lama sudah ditutup 👍</div>';
+      Admin.setCount('dashboard', d.jumlahBelumDitutup, true);
+      drawTren(d.tren);
+      App.call('getProfilPublik').then(function (p) {
+        App.applyBrand(p);
+        App.$('#dashProfilCta').hidden = !!(p.nama_yayasan && p.logo);
+      }).catch(function () {});
+      App.icons();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  App.$('#dfProgram').addEventListener('change', applyFilter);
+  App.$('#dfDari').addEventListener('change', applyFilter);
+  App.$('#dfSampai').addEventListener('change', applyFilter);
+  App.$$('.dash-preset [data-preset]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var r = presetDates(b.dataset.preset);
+      App.$('#dfDari').value = r.dari; App.$('#dfSampai').value = r.sampai;
+      applyFilter();
+    });
+  });
+
+  App.$('#view-dashboard').addEventListener('click', function (e) {
+    var k = e.target.closest('[data-kat]'); if (k) return showKategori(k.dataset.kat);
+    var b = e.target.closest('[data-go]'); if (b) return Admin.go(b.dataset.go);
+    var s = e.target.closest('[data-sesi]'); if (s) Admin.go('rekap', { program: s.dataset.prog, sesi: s.dataset.sesi });
+  });
+
+  Admin.register('dashboard', { title: 'Dashboard', subtitle: '', icon: 'layout-dashboard', show: show });
+})();
+</script>

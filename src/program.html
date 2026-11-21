@@ -1,0 +1,233 @@
+<!-- program.html — CRUD program + kelola sesi (buka/tutup) -->
+<section id="view-program" hidden>
+  <div class="grid" id="prGrid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))"></div>
+
+  <div id="sesiPanel" class="card panel" hidden>
+    <div class="panel-head">
+      <div>
+        <h2 id="sesiTitle">Sesi</h2>
+        <p class="muted" style="margin:2px 0 0;font-size:13px" id="sesiSub"></p>
+      </div>
+      <div class="row">
+        <button class="btn gold" id="sesiToday"><i data-lucide="calendar-plus"></i> Buka Sesi Hari Ini</button>
+        <button class="btn" id="sesiAdd"><i data-lucide="plus"></i> Sesi Lain</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="border-radius:12px;box-shadow:none">
+      <table class="table">
+        <thead><tr><th>Tanggal</th><th>Jam</th><th class="hide-sm-col">Keterangan</th><th>Hadir</th><th>Status</th><th style="text-align:right">Aksi</th></tr></thead>
+        <tbody id="sesiBody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  var $ = App.$;
+  var HARI = ['Ahad', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Setiap hari', 'Lainnya'];
+  var state = { rows: [], kelompok: [], selected: null, sesi: null };
+
+  function load() {
+    return App.api('listPrograms').then(function (d) {
+      state.rows = d.rows; state.kelompok = d.kelompok;
+      renderPrograms();
+      if (state.selected) {
+        if (state.rows.some(function (p) { return p.id_program === state.selected; })) loadSesi();
+        else { state.selected = null; $('#sesiPanel').hidden = true; }
+      }
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function renderPrograms() {
+    $('#prGrid').innerHTML = state.rows.length ? state.rows.map(function (p) {
+      var groups = p.kelompok_peserta ? p.kelompok_peserta.split(',').map(function (g) { return '<span class="chip">' + App.esc(g.trim()) + '</span>'; }).join('') : '<span class="chip gold">Semua jamaah aktif</span>';
+      return '<div class="card prog-card' + (state.selected === p.id_program ? ' selected' : '') + '" data-id="' + App.esc(p.id_program) + '">' +
+        '<div class="row between"><span class="dim mono">' + App.esc(p.id_program) + '</span>' + App.statusBadge(p.status) + '</div>' +
+        '<h3 style="margin:0;font-size:1.2rem">' + App.esc(p.nama_program) + '</h3>' +
+        (p.deskripsi ? '<p class="muted" style="margin:0">' + App.esc(p.deskripsi) + '</p>' : '') +
+        '<div class="meta"><span><i data-lucide="clock"></i>' + App.esc(p.jadwal || '—') + '</span>' +
+          '<span><i data-lucide="users"></i>' + p.jumlah_peserta + ' peserta</span>' +
+          '<span><i data-lucide="calendar-days"></i>' + p.jumlah_sesi + ' sesi</span></div>' +
+        '<div>' + groups + '</div>' +
+        '<div class="row" style="margin-top:4px">' +
+          '<button class="btn primary sm grow" data-act="sesi"><i data-lucide="calendar-check"></i> Kelola Sesi</button>' +
+          '<button class="btn sm" data-act="edit" title="Edit"><i data-lucide="pencil"></i></button>' +
+          '<button class="btn sm" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
+        '</div></div>';
+    }).join('') : '<div class="card empty">Belum ada program. Klik "Tambah Program".</div>';
+    App.icons();
+  }
+
+  function programForm(rec) {
+    var isEdit = !!rec;
+    var jad = (rec && rec.jadwal || '').match(/^(.*?)\s*(\d{1,2}[:.]\d{2})?$/) || [];
+    var hari = HARI.indexOf((jad[1] || '').trim()) !== -1 ? jad[1].trim() : (rec && rec.jadwal ? 'Lainnya' : 'Ahad');
+    var selectedGroups = rec && rec.kelompok_peserta ? rec.kelompok_peserta.split(',').map(function (s) { return s.trim(); }) : [];
+    App.formModal({
+      title: isEdit ? 'Edit Program · ' + rec.id_program : 'Tambah Program',
+      values: {
+        nama_program: rec ? rec.nama_program : '', deskripsi: rec ? rec.deskripsi : '',
+        hari: hari, jam: jad[2] ? jad[2].replace('.', ':') : '', jadwal_lain: hari === 'Lainnya' ? rec.jadwal : '',
+        kelompok_peserta: selectedGroups, status: rec ? rec.status : 'Aktif'
+      },
+      html:
+        '<label class="field"><span>Nama program *</span><input class="input" name="nama_program" required maxlength="80"></label>' +
+        '<label class="field"><span>Deskripsi</span><input class="input" name="deskripsi"></label>' +
+        '<div class="form-grid">' +
+          '<label class="field"><span>Hari</span><select class="input" name="hari">' + HARI.map(function (h) { return '<option>' + h + '</option>'; }).join('') + '</select></label>' +
+          '<label class="field"><span>Jam</span><input class="input" name="jam" type="time"></label>' +
+          '<label class="field full" data-lain hidden><span>Jadwal (bebas)</span><input class="input" name="jadwal_lain" placeholder="mis. Pekan ke-2 & ke-4, 19:30"></label>' +
+        '</div>' +
+        '<div class="field"><span>Peserta (fasilitator)</span>' +
+          (state.kelompok.length ? '<div class="check-grid">' + state.kelompok.map(function (k) {
+            return '<label class="check"><input type="checkbox" data-multi name="kelompok_peserta" value="' + App.esc(k) + '">' + App.esc(k) + '</label>';
+          }).join('') + '</div>' : '') +
+          '<p class="dim" style="margin:6px 0 0">Tidak dicentang sama sekali = <b>semua jamaah aktif</b> menjadi peserta.</p></div>' +
+        '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Selesai</option></select></label>',
+      onOpen: function (form) {
+        function sync() { form.querySelector('[data-lain]').hidden = form.hari.value !== 'Lainnya'; }
+        form.hari.addEventListener('change', sync); sync();
+      },
+      onSubmit: function (v) {
+        var jadwal = v.hari === 'Lainnya' ? v.jadwal_lain : (v.hari + (v.jam ? ' ' + v.jam : ''));
+        var data = { nama_program: v.nama_program, deskripsi: v.deskripsi, jadwal: jadwal,
+                     kelompok_peserta: v.kelompok_peserta || [], status: v.status };
+        if (isEdit) data.id_program = rec.id_program;
+        return App.api('saveProgram', data);
+      }
+    }).then(function (saved) {
+      if (!saved) return;
+      App.toast('Program disimpan: ' + saved.nama_program, 'ok');
+      load();
+    });
+  }
+
+  function delProgram(p) {
+    App.confirm('Hapus program?', 'Program "' + p.nama_program + '" akan dihapus permanen. Hanya bisa jika belum punya sesi.', 'Hapus', true)
+      .then(function (ok) {
+        if (!ok) return;
+        App.loading(true);
+        App.api('deleteProgram', p.id_program).then(function () { App.toast('Program dihapus', 'ok'); return load(); })
+          .catch(function (e) { App.toast(e.message, 'err', 5000); }).finally(function () { App.loading(false); });
+      });
+  }
+
+  /* ---------------- Sesi ---------------- */
+  function selectProgram(id) {
+    state.selected = id;
+    renderPrograms();
+    $('#sesiPanel').hidden = false;
+    $('#sesiBody').innerHTML = '<tr><td colspan="6" class="empty">Memuat…</td></tr>';
+    loadSesi().then(function () { $('#sesiPanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  }
+
+  function loadSesi() {
+    return App.api('listSesi', state.selected).then(function (d) {
+      state.sesi = d;
+      $('#sesiTitle').textContent = 'Sesi · ' + d.program.nama_program;
+      $('#sesiSub').textContent = d.rows.length + ' sesi · ' + d.peserta + ' peserta · jadwal ' + (d.program.jadwal || '—');
+      var today = App.today();
+      $('#sesiBody').innerHTML = d.rows.length ? d.rows.map(function (s) {
+        var open = s.status === 'Dibuka';
+        return '<tr data-id="' + App.esc(s.id_sesi) + '">' +
+          '<td><b>' + App.esc(App.tgl(s.tanggal, true)) + '</b>' + (s.tanggal === today ? ' <span class="chip gold">Hari ini</span>' : '') + '</td>' +
+          '<td class="mono">' + App.esc(s.jam_mulai || '–') + '</td>' +
+          '<td class="hide-sm-col">' + App.esc(s.keterangan) + '</td>' +
+          '<td class="mono">' + s.hadir + ' / ' + d.peserta + '</td>' +
+          '<td>' + App.statusBadge(s.status) + '</td>' +
+          '<td><div class="actions">' +
+            '<button class="btn" data-act="toggle" title="' + (open ? 'Tutup sesi' : 'Buka sesi') + '"><i data-lucide="' + (open ? 'lock' : 'lock-open') + '"></i></button>' +
+            '<button class="btn" data-act="edit" title="Edit"><i data-lucide="pencil"></i></button>' +
+            '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
+          '</div></td></tr>';
+      }).join('') : '<tr><td colspan="6" class="empty">Belum ada sesi. Klik "Buka Sesi Hari Ini".</td></tr>';
+      App.icons();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function jamDefault() {
+    var m = (state.sesi && state.sesi.program.jadwal || '').match(/(\d{1,2})[:.](\d{2})/);
+    return m ? ('0' + m[1]).slice(-2) + ':' + m[2] : '';
+  }
+
+  function sesiForm(rec) {
+    var isEdit = !!rec;
+    App.formModal({
+      title: isEdit ? 'Edit Sesi · ' + rec.id_sesi : 'Tambah Sesi',
+      values: rec || { tanggal: App.today(), jam_mulai: jamDefault(), status: 'Dibuka' },
+      html: '<div class="form-grid">' +
+        '<label class="field"><span>Tanggal *</span><input class="input" type="date" name="tanggal" required></label>' +
+        '<label class="field"><span>Jam mulai</span><input class="input" type="time" name="jam_mulai"></label>' +
+        '<label class="field full"><span>Keterangan</span><input class="input" name="keterangan" placeholder="mis. Tema: Adab menuntut ilmu"></label>' +
+        '<label class="field"><span>Status</span><select class="input" name="status"><option>Dibuka</option><option>Ditutup</option></select></label>' +
+        '</div>',
+      onSubmit: function (v) {
+        v.id_program = state.selected;
+        if (isEdit) v.id_sesi = rec.id_sesi;
+        return App.api('saveSesi', v);
+      }
+    }).then(function (saved) {
+      if (!saved) return;
+      App.toast('Sesi ' + App.tgl(saved.tanggal) + ' disimpan', 'ok');
+      load();
+    });
+  }
+
+  function openToday(btn) {
+    var nama = state.sesi ? state.sesi.program.nama_program : 'program ini';
+    App.confirm('Buka sesi hari ini?', 'Sesi ' + nama + ' tanggal ' + App.tgl(App.today(), true) + ' akan dibuka dan bisa langsung di-scan petugas.').then(function (yes) {
+      if (!yes) return;
+      App.busy(btn, App.api('saveSesi', { id_program: state.selected, tanggal: App.today(), jam_mulai: jamDefault(), status: 'Dibuka', keterangan: '' }))
+        .then(function () { App.toast('Sesi hari ini dibuka', 'ok'); load(); })
+        .catch(function (e) { App.toast(e.message, 'err', 5000); });
+    });
+  }
+
+  function sesiAction(act, s) {
+    if (act === 'edit') return sesiForm(s);
+    if (act === 'toggle') {
+      var to = s.status === 'Dibuka' ? 'Ditutup' : 'Dibuka';
+      return App.confirm(to === 'Ditutup' ? 'Tutup sesi?' : 'Buka kembali sesi?',
+        'Sesi ' + App.tgl(s.tanggal, true) + (to === 'Ditutup' ? ' akan ditutup — petugas tidak bisa scan lagi.' : ' akan dibuka kembali untuk scan.'), '', to === 'Ditutup')
+        .then(function (yes) {
+          if (!yes) return;
+          App.loading(true);
+          return App.api('setSesiStatus', s.id_sesi, to).then(function () {
+            App.toast('Sesi ' + App.tgl(s.tanggal) + ' ' + to.toLowerCase(), 'ok'); return loadSesi();
+          }).catch(function (e) { App.toast(e.message, 'err'); }).finally(function () { App.loading(false); });
+        });
+    }
+    if (act === 'del') {
+      App.confirm('Hapus sesi?', 'Sesi ' + App.tgl(s.tanggal, true) + ' akan dihapus. Hanya bisa jika belum ada absensi.', 'Hapus', true).then(function (ok) {
+        if (!ok) return;
+        App.loading(true);
+        App.api('deleteSesi', s.id_sesi).then(function () { App.toast('Sesi dihapus', 'ok'); return load(); })
+          .catch(function (e) { App.toast(e.message, 'err', 5000); }).finally(function () { App.loading(false); });
+      });
+    }
+  }
+
+  /* ---------------- Event ---------------- */
+  $('#prGrid').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]'); if (!b) return;
+    var id = b.closest('[data-id]').dataset.id;
+    var p = state.rows.filter(function (x) { return x.id_program === id; })[0];
+    if (b.dataset.act === 'sesi') selectProgram(id);
+    else if (b.dataset.act === 'edit') programForm(p);
+    else delProgram(p);
+  });
+  $('#sesiAdd').addEventListener('click', function () { sesiForm(null); });
+  $('#sesiToday').addEventListener('click', function () { openToday(this); });
+  $('#sesiBody').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]'); if (!b) return;
+    var id = b.closest('tr').dataset.id;
+    sesiAction(b.dataset.act, state.sesi.rows.filter(function (s) { return s.id_sesi === id; })[0]);
+  });
+
+  Admin.register('program', {
+    title: 'Program & Sesi', nav: 'Program & Sesi', subtitle: 'Pilih program untuk mengelola sesinya', icon: 'calendar-range', show: load,
+    actions: [{ label: 'Tambah Program', icon: 'plus', cls: 'primary', onClick: function () { programForm(null); } }]
+  });
+})();
+</script>

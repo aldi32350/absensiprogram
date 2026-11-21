@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <script>
+    // Terapkan tema tersimpan sebelum render (hindari kedip).
+    try { var th = JSON.parse(localStorage.getItem('absensi_theme') || '""'); if (th !== 'dark' && th !== 'light') th = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.setAttribute('data-theme', th); } catch (e) {}
+  </script>
+  <?!= include('styles') ?>
+</head>
+<body class="theme-kk auth-on" data-app-url="<?= appUrl ?>" data-login="<?= params.login || '' ?>">
+  <div class="blobs" aria-hidden="true"><span></span><span></span><span></span></div>
+  <?!= include('scripts') ?>
+
+  <script>
+  /*
+   * Router admin. Setiap halaman mendaftar lewat:
+   *   Admin.register(key, { title, subtitle, icon, actions: [{label, icon, cls, onClick}], init, show })
+   */
+  window.Admin = {
+    views: {}, order: [], current: null, role: 'admin',
+    register: function (key, def) { this.views[key] = def; this.order.push(key); },
+    /** Halaman/aksi tanpa `roles` = khusus admin. roles: ['admin','pendataan'] = boleh untuk petugas pendataan juga. */
+    can: function (def) {
+      if (def && def.only) return def.only.indexOf(this.role) !== -1;   // only: ['fasilitator'] = khusus peran itu (admin pun tidak)
+      return this.role === 'admin' || !!(def && def.roles && def.roles.indexOf(this.role) !== -1);
+    },
+    allowedViews: function () { var self = this; return this.order.filter(function (k) { return self.can(self.views[k]); }); },
+    go: function (key, arg) {
+      if (!this.views[key] || !this.can(this.views[key])) key = this.allowedViews()[0];
+      var self = this, v = this.views[key];
+      this.order.forEach(function (k) {
+        var el = document.getElementById('view-' + k);
+        if (el) el.hidden = (k !== key);
+      });
+      App.$$('#adminNav button[data-view]').forEach(function (b) { b.classList.toggle('active', b.dataset.view === key); });
+      App.$('#pageTitle').textContent = v.title;
+      this.setSubtitle(v.subtitle || '');
+      var act = App.$('#pageActions');
+      act.innerHTML = '';
+      (v.actions || []).filter(function (a) { return self.can(a); }).forEach(function (a) {
+        var b = document.createElement('button');
+        b.className = 'btn ' + (a.cls || '');
+        b.innerHTML = '<i data-lucide="' + a.icon + '"></i><span class="lbl">' + App.esc(a.label) + '</span>';
+        b.title = a.label;
+        b.addEventListener('click', function () { a.onClick(b); });
+        act.appendChild(b);
+      });
+      App.icons();
+      if (!v._inited && v.init) { v.init(); v._inited = true; }
+      this.current = key;
+      if (v.show) v.show(arg);
+      try { history.replaceState(null, '', '#' + key); } catch (e) {}
+      App.$('#adminApp').classList.remove('nav-open');
+      window.scrollTo(0, 0);
+    },
+    setSubtitle: function (t) { App.$('#pageSub').textContent = t || ''; },
+    setCount: function (key, n, bad) {
+      var b = App.$('#adminNav button[data-view="' + key + '"] .count');
+      if (!b) return;
+      b.hidden = !n; b.textContent = n; b.classList.toggle('bad', !!bad);
+    },
+    buildNav: function () {
+      var self = this;
+      App.$('#adminNav').innerHTML = '<div class="sb-title">Menu</div>' + this.allowedViews().map(function (k) {
+        var v = self.views[k];
+        return '<button type="button" data-view="' + k + '"><i data-lucide="' + v.icon + '"></i>' + App.esc(v.nav || v.title) +
+               '<span class="count" hidden></span></button>';
+      }).join('') +
+        (this.role === 'admin' ? '<div class="sb-title">Akun</div>' +
+          '<button type="button" id="btnAkun"><i data-lucide="key-round"></i>Ganti Password</button>' : '');
+      if (!this._navBound) {
+        this._navBound = true;
+        App.$('#adminNav').addEventListener('click', function (e) {
+          var b = e.target.closest('button[data-view]');
+          if (b) self.go(b.dataset.view);
+          if (e.target.closest('#btnAkun') && self.onAkun) self.onAkun();
+        });
+      }
+      App.icons();
+    }
+  };
+  </script>
+
+  <?!= include('login-admin') ?>
+
+  <div id="adminApp" class="shell" hidden>
+    <aside class="sidebar" aria-label="Menu utama">
+      <div class="sb-brand">
+        <div class="logo" data-logo style="background:none;overflow:hidden"></div>
+        <div><div class="t1">Absensi Jamaah</div><div class="t2" data-brand="nama">Panel Admin</div></div>
+      </div>
+      <nav class="sb-nav" id="adminNav"></nav>
+      <div class="sb-foot">
+        <div class="me">
+          <div class="avatar" id="meAvatar">A</div>
+          <div class="who"><div class="n" id="adminName"></div><div class="r" id="adminRole">Admin</div></div>
+          <button type="button" id="btnLogoutAdmin" title="Keluar" aria-label="Keluar"><i data-lucide="log-out"></i></button>
+        </div>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="btn ghost menu-btn" id="btnMenu" aria-label="Buka menu" style="width:40px;padding:0"><i data-lucide="menu"></i></button>
+        <div class="page-title"><h1 id="pageTitle">Dashboard</h1><p id="pageSub"></p></div>
+        <div class="top-actions">
+          <div class="seg" role="group" aria-label="Tema">
+            <button type="button" data-theme-set="light"><i data-lucide="sun"></i>Terang</button>
+            <button type="button" data-theme-set="dark"><i data-lucide="moon"></i>Gelap</button>
+          </div>
+          <span id="pageActions" class="top-actions"></span>
+        </div>
+      </header>
+      <main class="content">
+        <?!= include('dashboard') ?>
+        <?!= include('jamaah') ?>
+        <?!= include('fasilitator') ?>
+        <?!= include('laporan') ?>
+        <?!= include('program') ?>
+        <?!= include('petugas') ?>
+        <?!= include('kartu') ?>
+        <?!= include('rekap') ?>
+        <?!= include('profil') ?>
+      </main>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    function showLogin() {
+      document.body.classList.add('auth-on');
+      App.$('#adminApp').hidden = true;
+      App.$('#loginAdmin').hidden = false;
+    }
+    function showApp(s) {
+      document.body.classList.remove('auth-on');
+      App.$('#loginAdmin').hidden = true;
+      App.$('#adminApp').hidden = false;
+      Admin.role = s.role === 'pendataan' || s.role === 'fasilitator' ? s.role : 'admin';
+      Object.keys(Admin.views).forEach(function (k) { Admin.views[k]._inited = false; });
+      Admin.buildNav();
+      App.$('#adminRole').textContent = { pendataan: 'Petugas Pendataan', fasilitator: 'Fasilitator' }[Admin.role] || 'Admin';
+      App.$('#adminName').textContent = s.nama;
+      App.$('#meAvatar').textContent = (s.nama || 'A').split(/\s+/).map(function (w) { return w[0]; }).slice(0, 2).join('').toUpperCase();
+      var hash = (location.hash || '').replace('#', '');
+      Admin.go(hash || Admin.order[0]);
+    }
+    App.showLogin = showLogin;
+    App.onLoggedIn = showApp;
+
+    /* Menu HP (drawer) */
+    App.$('#btnMenu').addEventListener('click', function () { App.$('#adminApp').classList.add('nav-open'); });
+    App.$('#scrim').addEventListener('click', function () { App.$('#adminApp').classList.remove('nav-open'); });
+
+    App.$('#btnLogoutAdmin').addEventListener('click', function () {
+      App.confirm('Keluar', 'Yakin ingin keluar dari panel admin?', 'Keluar').then(function (ok) {
+        if (!ok) return;
+        App.logout();
+        Object.keys(Admin.views).forEach(function (k) { Admin.views[k]._inited = false; });
+        showLogin();
+      });
+    });
+
+    Admin.buildNav();
+
+    Admin.onAkun = function () {
+      App.$('#adminApp').classList.remove('nav-open');
+      App.formModal({
+        title: 'Ganti Password Admin',
+        okText: 'Ganti Password',
+        html:
+          '<label class="field"><span>Password lama *</span><input class="input" type="password" name="old" required autocomplete="current-password"></label>' +
+          '<label class="field"><span>Password baru (min. 8 karakter) *</span><input class="input" type="password" name="new1" required autocomplete="new-password"></label>' +
+          '<label class="field"><span>Ulangi password baru *</span><input class="input" type="password" name="new2" required autocomplete="new-password"></label>',
+        onSubmit: function (v) {
+          if (v.new1.length < 8) throw new Error('Password baru minimal 8 karakter.');
+          if (v.new1 !== v.new2) throw new Error('Ulangan password baru tidak sama.');
+          return App.api('changeAdminPassword', v.old, v.new1);
+        }
+      }).then(function (s) {
+        if (!s) return;
+        App.saveSession(s);
+        App.toast('Password berhasil diganti', 'ok');
+      });
+    };
+
+    App.loading(true);
+    App.restoreSession(['admin', 'pendataan', 'fasilitator']).then(function (s) {
+      App.loading(false);
+      if (s) showApp(s); else showLogin();
+    });
+  })();
+  </script>
+</body>
+</html>

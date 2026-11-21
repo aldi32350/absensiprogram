@@ -1,0 +1,19 @@
+# Absensi Jamaah di VPS (/opt/absensi-program).
+# Ikut jaringan Caddy yang sudah ada: Caddy meneruskan domain → absensi-program:3000 dan mengurus HTTPS.
+services:
+  absensi-program:
+    build: .
+    image: absensi-program:latest
+    container_name: absensi-program
+    restart: unless-stopped
+    environment:
+      APP_URL: ${APP_URL:-https://absensiprogram.web.id}
+    volumes:
+      - ./data:/app/data
+    networks: [proxy]
+    mem_limit: 256m
+
+networks:
+  proxy:
+    name: ${PROXY_NETWORK:-laporan_default}
+    external: true

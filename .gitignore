@@ -1,0 +1,6 @@
+dev/.data/
+data/
+node_modules/
+.clasprc.json
+.env
+*.tmp

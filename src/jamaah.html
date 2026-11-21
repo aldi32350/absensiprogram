@@ -1,0 +1,611 @@
+<!-- jamaah.html — data jamaah (format MASTER DATA JAMAAH MIM): CRUD, cari/filter, import, export, template -->
+<section id="view-jamaah" hidden>
+  <div class="toolbar">
+    <div class="input-wrap search">
+      <i data-lucide="search"></i>
+      <input class="input" id="jmSearch" type="search" placeholder="Cari nama, panggilan, ID, desa, HP…" autocomplete="off">
+    </div>
+    <select class="input" id="jmDesa"><option value="">Semua desa</option></select>
+    <select class="input" id="jmJk"><option value="">Ikhwan &amp; Akhwat</option><option value="L">Ikhwan</option><option value="P">Akhwat</option></select>
+    <select class="input" id="jmStatus">
+      <option value="Aktif">Aktif</option>
+      <option value="Nonaktif">Nonaktif</option>
+      <option value="">Semua status</option>
+    </select>
+    <select class="input" id="jmLengkap" title="Kelengkapan data">
+      <option value="">Semua kelengkapan</option>
+      <option value="belum">Data belum lengkap</option>
+      <option value="foto">Belum ada foto</option>
+      <option value="lengkap">Sudah lengkap</option>
+    </select>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr>
+        <th>No Jamaah</th><th>Nama</th><th class="hide-sm-col">JK</th><th class="hide-sm-col">Usia</th><th>Desa</th>
+        <th class="hide-sm-col">No HP</th><th>Kelengkapan</th><th>Status</th><th style="text-align:right">Aksi</th>
+      </tr></thead>
+      <tbody id="jmBody"><tr><td colspan="9" class="empty">Memuat…</td></tr></tbody>
+    </table>
+  </div>
+  <!-- Tampilan HP: daftar kartu (tabel disembunyikan di layar kecil) -->
+  <div class="jm-cards" id="jmCards"></div>
+  <p class="dim" id="jmMore" style="margin:0"></p>
+</section>
+
+<script>
+(function () {
+  var LIMIT = 300;
+  var XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  var state = { rows: [], kelompok: [], fasilitator: [], prefix: 'MIM-' };
+  var $ = App.$;
+
+  /* Kolom master jamaah — 18 kolom pertama sama persis dengan file "MASTER DATA JAMAAH" (sheet DATA MASTER JAMAAH);
+     Fasilitator & Tanggal Daftar = kolom tambahan aplikasi.
+     Dipakai bersama oleh template, export, dan import (supaya export → edit → import bisa langsung). */
+  var COLS = [
+    { k: 'id_jamaah', l: 'No Jamaah', text: 1, ket: 'Kosongkan untuk jamaah BARU (dibuat otomatis, mis. MIM-0123). Isi bila ingin MEMPERBARUI data jamaah yang sudah ada. Ini isi barcode di kartu.', alias: ['no jamaah', 'id jamaah', 'id', 'nomor jamaah', 'no'] },
+    { k: 'nama', l: 'Nama Lengkap', wajib: 1, ket: 'Nama lengkap sesuai identitas.', alias: ['nama lengkap', 'nama', 'name', 'nama jamaah'] },
+    { k: 'nama_panggilan', l: 'Nama Panggilan', ket: 'Nama panggilan sehari-hari.', alias: ['nama panggilan', 'panggilan'] },
+    { k: 'jenis_kelamin', l: 'Jenis Kelamin', wajib: 1, ket: 'Ikhwan atau Akhwat.', alias: ['jenis kelamin', 'jk', 'l p', 'gender', 'kelamin'] },
+    { k: 'tanggal_lahir', l: 'Tanggal Lahir', text: 1, ket: 'Format dd/mm/yyyy, mis. 20/01/2013.', alias: ['tanggal lahir', 'tgl lahir', 'ttl'] },
+    { k: 'usia', l: 'Usia', exportOnly: 1, ket: 'Dihitung otomatis dari tanggal lahir (diabaikan saat import).', alias: ['usia', 'umur'] },
+    { k: 'pekerjaan', l: 'Pekerjaan', ket: 'mis. Pelajar, Ibu Rumah Tangga, Buruh Tani.', alias: ['pekerjaan'] },
+    { k: 'no_hp', l: 'No HP', text: 1, ket: 'Format 08xxxxxxxxxx (boleh kosong).', alias: ['no hp', 'hp', 'nomor hp', 'telepon', 'no telp', 'no wa', 'wa', 'whatsapp'] },
+    { k: 'desa', l: 'Desa / Kampung', ket: 'Nama desa/kampung.', alias: ['desa kampung', 'desa', 'kampung'] },
+    { k: 'rt', l: 'RT', text: 1, ket: 'Angka RT.', alias: ['rt'] },
+    { k: 'rw', l: 'RW', text: 1, ket: 'Angka RW.', alias: ['rw'] },
+    { k: 'kecamatan', l: 'Kecamatan', ket: '', alias: ['kecamatan'] },
+    { k: 'kota', l: 'Kota / Kabupaten', ket: 'mis. Kabupaten Bogor.', alias: ['kota kabupaten', 'kota', 'kabupaten'] },
+    { k: 'provinsi', l: 'Provinsi', ket: '', alias: ['provinsi'] },
+    { k: 'no_kk', l: 'Kartu Keluarga', text: 1, ket: 'Nomor KK 16 digit (ketik sebagai teks).', alias: ['kartu keluarga', 'no kk', 'kk', 'nomor kk'] },
+    { k: 'status', l: 'Status', ket: 'Aktif atau Tidak Aktif. Kosong = Aktif. Nilai lain (mis. Jarang) disimpan di catatan.', alias: ['status'] },
+    { k: 'alamat', l: 'Alamat Asli', ket: 'Alamat lengkap / sesuai KTP.', alias: ['alamat asli', 'alamat'] },
+    { k: 'catatan', l: 'Catatan', ket: 'Catatan bebas.', alias: ['catatan', 'keterangan', 'ket'] },
+    { k: 'kelompok', l: 'Fasilitator', ket: 'Nama fasilitator pendamping (opsional, mis. Khansa & Silma). Nama baru otomatis masuk menu Fasilitator.', alias: ['fasilitator', 'kelompok', 'halaqah', 'kelompok halaqah', 'grup'] },
+    { k: 'tanggal_daftar', l: 'Tanggal Daftar', text: 1, ket: 'Format dd/mm/yyyy. Kosong = tanggal import.', alias: ['tanggal daftar', 'tgl daftar'] }
+  ];
+
+  /* ---------------- Util ---------------- */
+  function jkLabel(v) { return v === 'L' ? 'Ikhwan' : v === 'P' ? 'Akhwat' : ''; }
+  function usia(tgl) {
+    if (!tgl) return '';
+    var p = tgl.split('-'), t = App.today().split('-');
+    var u = +t[0] - +p[0] - ((+t[1] < +p[1] || (+t[1] === +p[1] && +t[2] < +p[2])) ? 1 : 0);
+    return u >= 0 && u < 130 ? u : '';
+  }
+  function dmy(ymd) { var p = String(ymd || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : ''; }
+  function mostCommon(key) {
+    var c = {}; state.rows.forEach(function (r) { if (r[key]) c[r[key]] = (c[r[key]] || 0) + 1; });
+    return Object.keys(c).sort(function (a, b) { return c[b] - c[a]; })[0] || '';
+  }
+
+  /* ---------------- Data & tabel ---------------- */
+  function load() {
+    return App.api('listJamaah').then(function (d) {
+      state.rows = d.rows; state.kelompok = d.kelompok; state.fasilitator = d.fasilitator || []; state.prefix = d.prefix || state.prefix;
+      state.thumbs = d.thumbs || {};
+      var sel = $('#jmDesa'), cur = sel.value;
+      sel.innerHTML = '<option value="">Semua desa</option>' +
+        (d.desa || []).map(function (k) { return '<option>' + App.esc(k) + '</option>'; }).join('') +
+        '<option value="__none">(Desa belum diisi)</option>';
+      sel.value = cur;
+      render();
+    }).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  /* Kelengkapan data (untuk pendataan ulang): isian penting yang masih kosong. */
+  var KL = [{ k: 'foto', l: 'Foto' }, { k: 'jenis_kelamin', l: 'Jenis kelamin' }, { k: 'tanggal_lahir', l: 'Tanggal lahir' },
+            { k: 'desa', l: 'Desa' }, { k: 'alamat', l: 'Alamat asli' }, { k: 'no_kk', l: 'Kartu keluarga' }];
+  function kurang(j) {
+    return KL.filter(function (f) { return f.k === 'foto' ? !(state.thumbs || {})[j.id_jamaah] : !String(j[f.k] || '').trim(); })
+      .map(function (f) { return f.l; });
+  }
+  function lengkapCell(j) {
+    var miss = kurang(j), n = KL.length - miss.length;
+    return miss.length
+      ? '<span class="chip gold" title="Belum diisi: ' + App.esc(miss.join(', ')) + '">' + n + '/' + KL.length + '</span>'
+      : '<span class="badge ok">Lengkap</span>';
+  }
+
+  function filtered() {
+    var q = App.norm($('#jmSearch').value), k = $('#jmDesa').value, st = $('#jmStatus').value, jk = $('#jmJk').value, lk = $('#jmLengkap').value;
+    return state.rows.filter(function (j) {
+      if (lk === 'belum' && !kurang(j).length) return false;
+      if (lk === 'foto' && (state.thumbs || {})[j.id_jamaah]) return false;
+      if (lk === 'lengkap' && kurang(j).length) return false;
+      if (k === '__none' ? j.desa : (k && j.desa !== k)) return false;
+      if (st && j.status !== st) return false;
+      if (jk && j.jenis_kelamin !== jk) return false;
+      if (q && App.norm([j.nama, j.nama_panggilan, j.id_jamaah, j.no_hp, j.desa].join(' ')).indexOf(q) === -1) return false;
+      return true;
+    }).sort(function (a, b) { return a.id_jamaah.localeCompare(b.id_jamaah, 'id', { numeric: true }); });
+  }
+
+  function render() {
+    var list = filtered();
+    var aktif = state.rows.filter(function (j) { return j.status === 'Aktif'; }).length;
+    var belumLengkap = state.rows.filter(function (j) { return j.status === 'Aktif' && kurang(j).length; }).length;
+    var tanpaFoto = state.rows.filter(function (j) { return j.status === 'Aktif' && !(state.thumbs || {})[j.id_jamaah]; }).length;
+    if (Admin.current === 'jamaah') Admin.setSubtitle(Admin.role === 'pendataan'
+      ? belumLengkap + ' dari ' + aktif + ' jamaah aktif belum lengkap · ' + tanpaFoto + ' belum ada foto · ditampilkan ' + list.length
+      : aktif + ' aktif dari ' + state.rows.length + ' jamaah · ' + belumLengkap + ' belum lengkap · ditampilkan ' + list.length);
+    Admin.setCount('jamaah', Admin.role === 'pendataan' ? belumLengkap : aktif, Admin.role === 'pendataan');
+    var isAdmin = Admin.role === 'admin';
+    $('#jmBody').innerHTML = list.length ? list.slice(0, LIMIT).map(function (j) {
+      var on = j.status === 'Aktif';
+      return '<tr class="jm-row" data-id="' + App.esc(j.id_jamaah) + '" title="Klik untuk melihat detail">' +
+        '<td class="mono">' + App.esc(j.id_jamaah) + '</td>' +
+        '<td><div class="jm-name">' + App.avatar((state.thumbs || {})[j.id_jamaah], j.nama, 36) + '<div><b>' + App.esc(j.nama) + '</b>' +
+          (j.nama_panggilan && j.nama_panggilan !== j.nama ? '<div class="dim">' + App.esc(j.nama_panggilan) + '</div>' : '') + '</div></div></td>' +
+        '<td class="hide-sm-col">' + App.esc(jkLabel(j.jenis_kelamin) || '–') + '</td>' +
+        '<td class="hide-sm-col mono">' + App.esc(usia(j.tanggal_lahir)) + '</td>' +
+        '<td>' + App.esc(j.desa || '–') + (j.rt ? '<div class="dim">RT ' + App.esc(j.rt) + (j.rw ? '/RW ' + App.esc(j.rw) : '') + '</div>' : '') + '</td>' +
+        '<td class="hide-sm-col mono">' + App.esc(j.no_hp || '–') + '</td>' +
+        '<td>' + lengkapCell(j) + '</td>' +
+        '<td>' + App.statusBadge(j.status) + '</td>' +
+        '<td><div class="actions">' +
+          (isAdmin ? '<button class="btn" data-act="kartu" title="Cetak kartu"><i data-lucide="id-card"></i></button>' : '') +
+          '<button class="btn" data-act="edit" title="Lengkapi / edit"><i data-lucide="pencil"></i></button>' +
+          (isAdmin ? '<button class="btn" data-act="toggle" title="' + (on ? 'Nonaktifkan' : 'Aktifkan') + '"><i data-lucide="' + (on ? 'user-x' : 'user-check') + '"></i></button>' : '') +
+        '</div></td></tr>';
+    }).join('') : '<tr><td colspan="9" class="empty">Tidak ada jamaah yang cocok.</td></tr>';
+    // Kartu untuk HP: foto, nama, ID · desa, data yang masih kurang, tombol Edit besar.
+    $('#jmCards').innerHTML = list.length ? list.slice(0, LIMIT).map(function (j) {
+      var miss = kurang(j), wil = [j.desa, j.rt ? 'RT ' + j.rt + (j.rw ? '/' + j.rw : '') : ''].filter(String).join(' · ');
+      return '<div class="jm-card" data-id="' + App.esc(j.id_jamaah) + '">' +
+        App.avatar((state.thumbs || {})[j.id_jamaah], j.nama, 52) +
+        '<div class="jc-main"><div class="jc-name">' + App.esc(j.nama) + '</div>' +
+          '<div class="jc-sub"><span class="mono">' + App.esc(j.id_jamaah) + '</span>' + (wil ? ' · ' + App.esc(wil) : '') +
+            (j.status !== 'Aktif' ? ' · <b>' + App.esc(j.status) + '</b>' : '') + '</div>' +
+          (miss.length ? '<div class="jc-miss"><i data-lucide="alert-circle"></i> Kurang: ' + App.esc(miss.join(', ')) + '</div>'
+                       : '<div class="jc-ok"><i data-lucide="check-circle-2"></i> Data lengkap</div>') +
+        '</div>' +
+        '<button class="btn primary jc-edit" data-act="edit" aria-label="Edit ' + App.esc(j.nama) + '"><i data-lucide="pencil"></i><span>Edit</span></button>' +
+      '</div>';
+    }).join('') : '<div class="glass card empty">Tidak ada jamaah yang cocok.</div>';
+    $('#jmMore').textContent = list.length > LIMIT ? 'Menampilkan ' + LIMIT + ' pertama. Persempit pencarian untuk melihat lainnya.' : '';
+    App.icons();
+  }
+
+  /* ---------------- Form tambah / edit ---------------- */
+  function f(name, label, extra, cls) {
+    return '<label class="field ' + (cls || '') + '"><span>' + label + '</span><input class="input" name="' + name + '" ' + (extra || '') + '></label>';
+  }
+  function formHtml(rec) {
+    return '<div class="form-grid">' +
+      (rec ? '<div class="field full"><span>No Jamaah (isi barcode)</span><div class="mono" style="font-weight:700;font-size:16px">' + App.esc(rec.id_jamaah) + '</div></div>' : '') +
+      '<div class="full sec-title">Identitas</div>' +
+      f('nama', 'Nama lengkap *', 'required maxlength="100"', 'full') +
+      f('nama_panggilan', 'Nama panggilan') +
+      '<label class="field"><span>Jenis kelamin *</span><select class="input" name="jenis_kelamin" required>' +
+        '<option value="">— pilih —</option><option value="L">Ikhwan</option><option value="P">Akhwat</option></select></label>' +
+      f('tanggal_lahir', 'Tanggal lahir', 'type="date"') +
+      f('pekerjaan', 'Pekerjaan', 'list="jmPekerjaanList"') +
+      '<div class="full sec-title">Kontak &amp; alamat</div>' +
+      f('no_hp', 'No HP', 'inputmode="tel" placeholder="08xxxxxxxxxx"') +
+      f('desa', 'Desa / kampung', 'list="jmDesaList"') +
+      f('rt', 'RT', 'inputmode="numeric"') + f('rw', 'RW', 'inputmode="numeric"') +
+      f('kecamatan', 'Kecamatan') + f('kota', 'Kota / kabupaten') +
+      f('provinsi', 'Provinsi') +
+      f('alamat', 'Alamat asli', '', 'full') +
+      '<div class="full sec-title">Keanggotaan</div>' +
+      fasilitatorSelect(rec && rec.kelompok) +
+      f('no_kk', 'No Kartu Keluarga', 'inputmode="numeric" maxlength="20"') +
+      f('tanggal_daftar', 'Tanggal daftar', 'type="date"') +
+      '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
+      '<label class="field full"><span>Catatan</span><textarea class="input" name="catatan" rows="2"></textarea></label>' +
+      '</div>' +
+      datalist('jmDesaList', uniq('desa')) + datalist('jmPekerjaanList', uniq('pekerjaan'));
+  }
+  /** Fasilitator dipilih dari master (menu Fasilitator), opsional. */
+  function fasilitatorSelect(cur) {
+    var list = state.fasilitator.slice();
+    if (cur && list.indexOf(cur) === -1) list.unshift(cur);
+    return '<label class="field"><span>Fasilitator (opsional)</span><select class="input" name="kelompok"><option value="">— belum ada —</option>' +
+      list.map(function (n) { return '<option value="' + App.esc(n) + '">' + App.esc(n) + '</option>'; }).join('') + '</select></label>';
+  }
+  function uniq(key) { var s = {}; state.rows.forEach(function (r) { if (r[key]) s[r[key]] = 1; }); return Object.keys(s).sort(); }
+  function datalist(id, arr) { return '<datalist id="' + id + '">' + arr.map(function (k) { return '<option value="' + App.esc(k) + '">'; }).join('') + '</datalist>'; }
+
+  /** Kolom foto di form (pilih file / ambil kamera), hasil selalu WebP. */
+  function fotoFieldHtml(rec) {
+    var th = rec ? (state.thumbs || {})[rec.id_jamaah] : '';
+    return '<div class="field"><span>Foto jamaah</span><div class="foto-field">' +
+      '<span data-fprev>' + App.avatar(th, rec ? rec.nama : '', 72) + '</span>' +
+      '<div class="grow"><div class="row">' +
+        '<label class="btn sm" style="cursor:pointer"><i data-lucide="camera"></i> Ambil foto<input type="file" accept="image/*" capture="user" data-ffile hidden></label>' +
+        '<label class="btn sm" style="cursor:pointer"><i data-lucide="image-up"></i> Pilih file<input type="file" accept="image/*" data-ffile hidden></label>' +
+        (th ? '<button type="button" class="btn sm ghost" data-fdel>Hapus foto</button>' : '') +
+      '</div><small class="dim" data-finfo>Otomatis dikonversi ke WebP (±30 KB) agar hemat penyimpanan.</small></div></div></div>';
+  }
+  function bindFotoField(form, holder) {
+    App.$$('[data-ffile]', form).forEach(function (inp) {
+      inp.addEventListener('change', function () {
+        var f = inp.files[0]; inp.value = ''; if (!f) return;
+        App.fotoKeWebp(f).then(function (r) {
+          holder.foto = r; holder.changed = true;
+          form.querySelector('[data-fprev]').innerHTML = '<img class="ava" style="width:72px;height:72px" src="' + r.foto + '" alt="">';
+          form.querySelector('[data-finfo]').textContent = 'Siap disimpan · WebP ' + Math.round(r.foto.length * 0.75 / 1024) + ' KB (asli ' + Math.round(f.size / 1024) + ' KB)';
+        }).catch(function (e) { App.toast(e.message, 'err', 5000); });
+      });
+    });
+    var del = form.querySelector('[data-fdel]');
+    if (del) del.addEventListener('click', function () {
+      holder.foto = null; holder.changed = true;
+      form.querySelector('[data-fprev]').innerHTML = App.avatar('', form.nama.value, 72);
+      form.querySelector('[data-finfo]').textContent = 'Foto akan dihapus saat disimpan.';
+    });
+  }
+
+  function openForm(rec) {
+    var isEdit = !!rec, foto = { changed: false, foto: null };
+    App.formModal({
+      title: isEdit ? 'Data Jamaah · ' + rec.nama : 'Tambah Jamaah',
+      html: (isEdit && kurang(rec).length
+              ? '<div class="profil-cta" style="padding:10px 14px"><i data-lucide="clipboard-pen"></i><div class="grow"><b>Belum diisi</b><span>' + App.esc(kurang(rec).join(', ')) + '</span></div></div>'
+              : '') + fotoFieldHtml(rec) + formHtml(rec),
+      values: rec || { status: 'Aktif', tanggal_daftar: App.today(), kecamatan: mostCommon('kecamatan'), kota: mostCommon('kota'), provinsi: mostCommon('provinsi'), desa: mostCommon('desa') },
+      onOpen: function (form) {
+        bindFotoField(form, foto);
+        if (Admin.role !== 'admin') {   // status aktif/nonaktif hanya diatur admin
+          var st = form.querySelector('[name=status]'); if (st) { st.disabled = true; st.closest('.field').title = 'Status hanya bisa diubah admin'; }
+        }
+        // tandai isian penting yang masih kosong
+        if (isEdit) KL.forEach(function (f) { var el = form.querySelector('[name="' + f.k + '"]'); if (el && !String(el.value).trim()) el.classList.add('need'); });
+      },
+      onSubmit: function (v) {
+        var phone = v.no_hp.replace(/[\s\-().]/g, '');
+        if (phone && !/^(\+62|62|0)?8\d{7,12}$/.test(phone)) throw new Error('Format no HP tidak valid (contoh 081234567890).');
+        if (isEdit) v.id_jamaah = rec.id_jamaah;
+        var kk = v.no_kk ? v.no_kk.replace(/\D/g, '') : '';
+        return App.api('saveJamaah', v).then(function (saved) {
+          if (kk && kk.length !== 16) App.toast('Tersimpan, tapi No KK ' + kk.length + ' digit (seharusnya 16) — mohon dicek.', 'warn', 5000);
+          if (!foto.changed) return saved;
+          return App.api('simpanFotoJamaah', saved.id_jamaah, foto.foto ? foto.foto.foto : '', foto.foto ? foto.foto.thumb : '', '')
+            .then(function () { return saved; });
+        });
+      }
+    }).then(function (saved) {
+      if (!saved) return;
+      App.toast((isEdit ? 'Data diperbarui: ' : 'Jamaah ditambahkan: ') + saved.nama + ' (' + saved.id_jamaah + ')', 'ok');
+      load();
+    });
+  }
+
+  /* ---------------- Detail jamaah (klik baris) ---------------- */
+  function openDetail(j) {
+    var esc = App.esc, th = (state.thumbs || {})[j.id_jamaah];
+    function row(label, val, full) { return '<div class="pf-item' + (full ? ' full' : '') + '"><span>' + label + '</span><b>' + (val ? val : '<i class="dim">–</i>') + '</b></div>'; }
+    var wa = j.no_hp ? j.no_hp.replace(/^0/, '62').replace(/\D/g, '') : '';
+    var hp = j.no_hp ? esc(j.no_hp) + ' <a class="pf-link" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">WhatsApp</a>' : '';
+    var rtrw = (j.rt ? 'RT ' + j.rt : '') + (j.rw ? (j.rt ? ' / ' : '') + 'RW ' + j.rw : '');
+    var u = usia(j.tanggal_lahir);
+    var html = '<div class="det-wrap">' +
+      '<div data-dfoto>' + (th ? '<img class="foto-big" src="' + esc(th) + '" alt="">' : '<span class="ava ava-ini foto-big">' + esc((j.nama || '?').split(/\s+/).map(function (w) { return w[0]; }).slice(0, 2).join('').toUpperCase()) + '</span>') + '</div>' +
+      '<div><div class="dim mono">' + esc(j.id_jamaah) + ' · ' + App.statusBadge(j.status) + '</div>' +
+        '<h2 style="margin:4px 0 12px">' + esc(j.nama) + '</h2>' +
+        '<div class="pf-grid">' +
+          row('Nama panggilan', esc(j.nama_panggilan)) + row('Jenis kelamin', jkLabel(j.jenis_kelamin)) +
+          row('Tanggal lahir · usia', j.tanggal_lahir ? esc(App.tgl(j.tanggal_lahir)) + (u !== '' ? ' · ' + u + ' th' : '') : '') + row('Pekerjaan', esc(j.pekerjaan)) +
+          row('No HP', hp, true) + row('Alamat asli', esc(j.alamat), true) +
+          row('Desa · wilayah', [j.desa, rtrw, j.kecamatan, j.kota, j.provinsi].filter(String).map(esc).join(', '), true) +
+          row('Kartu keluarga', esc(j.no_kk)) + row('Fasilitator', esc(j.kelompok)) +
+          row('Terdaftar sejak', j.tanggal_daftar ? esc(App.tgl(j.tanggal_daftar)) : '') + row('Status', esc(j.status)) +
+          (j.catatan ? row('Catatan', esc(j.catatan), true) : '') +
+        '</div></div></div>' +
+      '<div class="row" style="margin-top:16px">' +
+        '<button class="btn primary sm" data-d="edit"><i data-lucide="pencil"></i> Edit data &amp; foto</button>' +
+        (Admin.role === 'admin' ? '<button class="btn sm" data-d="kartu"><i data-lucide="id-card"></i> Cetak kartu</button>' +
+          '<button class="btn sm" data-d="rekap"><i data-lucide="chart-column"></i> Rekap kehadiran</button>' : '') + '</div>';
+    App.modal({
+      title: 'Detail Jamaah', html: html, okText: 'Tutup', cancelText: false,
+      onOpen: function (wrap) {
+        wrap.querySelector('.modal-box').style.maxWidth = '760px';
+        wrap.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-d]'); if (!b) return;
+          wrap.remove();
+          if (b.dataset.d === 'edit') openForm(j);
+          else if (b.dataset.d === 'kartu') Admin.go('kartu', { ids: [j.id_jamaah] });
+          else Admin.go('rekap', { jamaah: j.id_jamaah, nama: j.nama });
+        });
+        if (th) App.api('getFotoJamaah', j.id_jamaah).then(function (full) {   // foto besar dari Drive (privat)
+          var box = wrap.querySelector('[data-dfoto] img'); if (box && full) box.src = full;
+        }).catch(function () {});
+      }
+    });
+  }
+
+  function toggle(rec) {
+    var to = rec.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
+    App.confirm(to === 'Nonaktif' ? 'Nonaktifkan jamaah?' : 'Aktifkan jamaah?',
+      rec.nama + (to === 'Nonaktif' ? ' tidak akan dihitung sebagai peserta dan kartunya ditolak saat scan. Riwayat absensi tetap tersimpan.' : ' akan kembali aktif.'),
+      to === 'Nonaktif' ? 'Nonaktifkan' : 'Aktifkan', to === 'Nonaktif')
+      .then(function (ok) {
+        if (!ok) return;
+        App.loading(true);
+        App.api('setJamaahStatus', rec.id_jamaah, to).then(function () {
+          App.toast(rec.nama + ' → ' + to, 'ok'); return load();
+        }).catch(function (e) { App.toast(e.message, 'err'); }).finally(function () { App.loading(false); });
+      });
+  }
+
+  /* =====================================================================
+     EXPORT   = SEMUA data jamaah, semua kolom (termasuk No Jamaah & Usia), format = sheet DATA MASTER JAMAAH.
+                Untuk arsip/laporan, atau diedit lalu di-Import kembali untuk memperbarui data.
+     TEMPLATE = lembar KOSONG berisi kolom yang diisi saat import jamaah BARU (+ sheet PETUNJUK & contoh).
+     ===================================================================== */
+  var SHEET_DATA = 'DATA MASTER JAMAAH';
+  var TPL_COLS = COLS.filter(function (c) { return c.k !== 'id_jamaah' && !c.exportOnly; });
+  function tplLabel(c) { return c.l + (c.wajib ? ' *' : ''); }
+  var CONTOH = {
+    nama: 'Siti Aminah', nama_panggilan: 'Siti', jenis_kelamin: 'Akhwat', tanggal_lahir: '20/01/2013', pekerjaan: 'Pelajar',
+    no_hp: '081234567890', rt: '4', rw: '4', no_kk: '3201xxxxxxxxxxxx (16 digit)', status: 'Aktif', alamat: 'Cinangneng',
+    catatan: '', tanggal_daftar: '(kosong = tanggal import)'
+  };
+
+  function exportRow(j) {
+    return COLS.map(function (c) {
+      if (c.k === 'jenis_kelamin') return jkLabel(j.jenis_kelamin);
+      if (c.k === 'usia') return usia(j.tanggal_lahir);
+      if (c.k === 'tanggal_lahir' || c.k === 'tanggal_daftar') return dmy(j[c.k]);
+      if (c.k === 'status') return j.status === 'Nonaktif' ? 'Tidak Aktif' : 'Aktif';
+      return j[c.k] || '';
+    });
+  }
+
+  /** Sheet Excel: kolom teks diberi format "@" (juga baris kosong) agar Excel tidak merusak no HP/KK/tanggal. */
+  function makeSheet(cols, headers, rows, blankRows) {
+    var aoa = [headers].concat(rows);
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    var total = aoa.length + (blankRows || 0);
+    cols.forEach(function (c, ci) {
+      if (!c.text) return;
+      for (var r = 1; r < total; r++) {
+        var ref = XLSX.utils.encode_cell({ r: r, c: ci });
+        var cell = ws[ref];
+        if (!cell) ws[ref] = cell = { t: 's', v: '' };
+        cell.t = 's'; cell.v = cell.v === undefined || cell.v === null ? '' : String(cell.v); cell.z = '@';
+      }
+    });
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(total, 2) - 1, c: cols.length - 1 } });
+    ws['!cols'] = cols.map(function (c, i) {
+      var w = String(headers[i]).length;
+      rows.forEach(function (r) { w = Math.max(w, String(r[i] === undefined ? '' : r[i]).length); });
+      return { wch: Math.min(38, Math.max(10, w + 2)) };
+    });
+    return ws;
+  }
+
+  function petunjukRows() {
+    return TPL_COLS.map(function (c) {
+      var contoh = c.k in CONTOH ? CONTOH[c.k] : (c.k === 'kelompok' ? (state.fasilitator[0] || '(opsional)') : mostCommon(c.k));
+      return [tplLabel(c), c.wajib ? 'Wajib' : 'Opsional', contoh, c.ket];
+    });
+  }
+  function petunjukSheet() {
+    var rows = [['PETUNJUK PENGISIAN TEMPLATE DATA JAMAAH'], [''],
+      ['1. Isi di sheet "' + SHEET_DATA + '", satu baris per jamaah, mulai baris ke-2. Jangan ubah judul kolom.'],
+      ['2. Kolom bertanda * wajib diisi: Nama Lengkap dan Jenis Kelamin (Ikhwan / Akhwat).'],
+      ['3. No Jamaah TIDAK perlu diisi — dibuat otomatis saat import (mis. ' + state.prefix + '0123). Usia dihitung otomatis.'],
+      ['4. No HP, Kartu Keluarga, RT, RW, dan tanggal sudah berformat TEKS (angka 0 di depan & 16 digit KK aman).'],
+      ['5. Tanggal ditulis dd/mm/yyyy. Status: Aktif atau Tidak Aktif (kosong = Aktif).'],
+      ['6. Simpan sebagai .xlsx, lalu di aplikasi: menu Jamaah → Import.'], [''],
+      ['Kolom', 'Wajib?', 'Contoh isian', 'Keterangan']].concat(petunjukRows());
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 20 }, { wch: 9 }, { wch: 28 }, { wch: 95 }];
+    return ws;
+  }
+
+  function sortedRows(list) {
+    return list.slice().sort(function (a, c) { return a.id_jamaah.localeCompare(c.id_jamaah, 'id', { numeric: true }); }).map(exportRow);
+  }
+
+  /* ---------- EXPORT: semua data ---------- */
+  function openExport() {
+    var list = filtered();
+    App.modal({
+      title: 'Export Data Jamaah',
+      cancelText: false, okText: 'Tutup',
+      html:
+        '<p class="muted" style="margin:0 0 6px">Berisi <b>seluruh data jamaah</b> dengan semua kolom (termasuk No Jamaah &amp; Usia), format sama dengan sheet <b>' + SHEET_DATA + '</b>. ' +
+        'Bisa diedit lalu di-<b>Import</b> kembali untuk memperbarui data — jangan ubah No Jamaah.</p>' +
+        '<div class="field"><span>Data yang diexport</span><select class="input" data-scope>' +
+          '<option value="all">Semua jamaah (' + state.rows.length + ')</option>' +
+          '<option value="filter">Sesuai filter saat ini (' + list.length + ')</option></select></div>' +
+        '<div class="stack" style="margin-top:12px">' +
+          '<button class="btn primary block" data-x="xlsx"><i data-lucide="file-spreadsheet"></i> Excel (.xlsx)</button>' +
+          '<button class="btn block" data-x="csv"><i data-lucide="file-text"></i> CSV</button>' +
+          '<button class="btn block" data-x="drive"><i data-lucide="hard-drive-upload"></i> Simpan ke Google Drive</button>' +
+        '</div>',
+      onOpen: function (wrap) {
+        wrap.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-x]'); if (!b) return;
+          e.stopPropagation();
+          var rows = sortedRows(wrap.querySelector('[data-scope]').value === 'filter' ? filtered() : state.rows);
+          var headers = COLS.map(function (c) { return c.l; });
+          var name = 'Export_Data_Jamaah_' + App.today();
+          var x = b.dataset.x;
+          if (x === 'csv') {
+            var cell = function (v) { v = String(v === undefined || v === null ? '' : v); return /[",\n;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+            App.download(name + '.csv', [headers].concat(rows).map(function (r) { return r.map(cell).join(','); }).join('\n'));
+            App.api('logExportJamaah', 'csv', rows.length).catch(function () {});
+            return;
+          }
+          if (x === 'xlsx') {
+            return App.busy(b, App.loadScript(XLSX_URL).then(function () {
+              var wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, makeSheet(COLS, headers, rows, 0), SHEET_DATA);
+              XLSX.writeFile(wb, name + '.xlsx');
+              App.api('logExportJamaah', 'xlsx', rows.length).catch(function () {});
+            })).catch(function (err) { App.toast(err.message, 'err'); });
+          }
+          App.busy(b, App.api('exportKeDrive', 'Export Data Jamaah ' + App.today(), [{ name: SHEET_DATA, headers: headers, rows: rows }])).then(function (r) {
+            window.open(r.sheetUrl, '_blank', 'noopener');
+            App.toast('Tersimpan di Drive (folder Rekap Absensi Jamaah).', 'ok', 5000);
+          }).catch(function (err) { App.toast(err.message, 'err', 5000); });
+        });
+      }
+    });
+  }
+
+  /* ---------- TEMPLATE: lembar kosong untuk diisi lalu di-import ---------- */
+  function downloadTemplate(btn) {
+    App.busy(btn, App.loadScript(XLSX_URL).then(function () {
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, makeSheet(TPL_COLS, TPL_COLS.map(tplLabel), [], 300), SHEET_DATA);
+      XLSX.utils.book_append_sheet(wb, petunjukSheet(), 'PETUNJUK');
+      XLSX.writeFile(wb, 'Template_Import_Jamaah.xlsx');
+      App.api('logExportJamaah', 'template', 0).catch(function () {});
+    })).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  function openTemplate() {
+    App.modal({
+      title: 'Template Import Jamaah',
+      cancelText: false, okText: 'Tutup',
+      html:
+        '<p class="muted" style="margin:0 0 8px">Lembar <b>kosong</b> untuk diisi data jamaah <b>baru</b>, lalu di-<b>Import</b>. Hanya berisi kolom yang perlu diisi — No Jamaah &amp; Usia dibuat otomatis. Sheet <b>PETUNJUK</b> berisi contoh isian tiap kolom.</p>' +
+        '<div class="table-wrap" style="max-height:34vh;box-shadow:none;margin-bottom:12px"><table class="table"><thead><tr><th>Kolom</th><th>Wajib?</th><th>Contoh</th></tr></thead><tbody>' +
+          petunjukRows().map(function (r) { return '<tr><td><b>' + App.esc(r[0]) + '</b></td><td>' + (r[1] === 'Wajib' ? '<span class="badge warn">Wajib</span>' : '<span class="dim">Opsional</span>') + '</td><td class="dim">' + App.esc(r[2]) + '</td></tr>'; }).join('') +
+        '</tbody></table></div>' +
+        '<div class="row"><button class="btn primary grow" data-x="tpl"><i data-lucide="download"></i> Unduh Template Excel</button>' +
+        '<button class="btn" data-x="tpl-drive"><i data-lucide="hard-drive-upload"></i> Google Drive</button></div>',
+      onOpen: function (wrap) {
+        wrap.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-x]'); if (!b) return;
+          e.stopPropagation();
+          if (b.dataset.x === 'tpl') return downloadTemplate(b);
+          var tables = [{ name: SHEET_DATA, headers: TPL_COLS.map(tplLabel), rows: [] },
+                        { name: 'PETUNJUK', headers: ['Kolom', 'Wajib?', 'Contoh isian', 'Keterangan'], rows: petunjukRows() }];
+          App.busy(b, App.api('exportKeDrive', 'Template Import Jamaah', tables)).then(function (r) {
+            window.open(r.sheetUrl, '_blank', 'noopener');
+            App.toast('Template tersimpan di Drive (folder Rekap Absensi Jamaah).', 'ok', 5000);
+          }).catch(function (err) { App.toast(err.message, 'err', 5000); });
+        });
+      }
+    });
+  }
+
+  /* ---------------- Import CSV / Excel ---------------- */
+  function keyFor(header) {
+    var h = String(header).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    for (var i = 0; i < COLS.length; i++) {
+      var c = COLS[i];
+      if (c.alias.indexOf(h) !== -1 || h === c.k.replace(/_/g, ' ') || h === c.l.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()) return c.exportOnly ? '__skip' : c.k;
+    }
+    return null;
+  }
+
+  function parseFile(file) {
+    return App.loadScript(XLSX_URL).then(function () { return file.arrayBuffer(); }).then(function (buf) {
+      var wb = XLSX.read(buf, { type: 'array', cellDates: false, codepage: 65001 });
+      // Pilih sheet yang paling banyak kolomnya dikenali (mis. "MASTER JAMAAH", bukan "RINGKASAN").
+      var best = null;
+      wb.SheetNames.forEach(function (sn) {
+        var raw = XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '', raw: false });
+        if (!raw.length) return;
+        var map = {}, unknown = [], n = 0;
+        Object.keys(raw[0]).forEach(function (h) { var k = keyFor(h); if (k && k !== '__skip') { map[h] = k; n++; } else if (!k) unknown.push(h); });
+        var hasNama = Object.keys(map).some(function (h) { return map[h] === 'nama'; });
+        if (hasNama && (!best || n > best.n)) best = { sheet: sn, raw: raw, map: map, unknown: unknown, n: n };
+      });
+      if (!best) throw new Error('Tidak ada sheet dengan kolom "Nama Lengkap" di baris pertama.');
+      var rows = best.raw.map(function (r) {
+        var o = {}; Object.keys(best.map).forEach(function (h) { o[best.map[h]] = String(r[h]).trim(); }); return o;
+      }).filter(function (o) { return o.nama; });
+      var ids = rows.filter(function (r) { return r.id_jamaah; }).map(function (r) { return r.id_jamaah.toUpperCase(); });
+      var known = {}; state.rows.forEach(function (j) { known[j.id_jamaah] = true; });
+      return { sheet: best.sheet, rows: rows, cols: Object.keys(best.map).map(function (h) { return best.map[h]; }), unknown: best.unknown,
+               baru: rows.length - ids.filter(function (id) { return known[id]; }).length, update: ids.filter(function (id) { return known[id]; }).length };
+    });
+  }
+
+  function openImport() {
+    var parsed = null;
+    App.formModal({
+      title: 'Import Data Jamaah',
+      okText: 'Import',
+      html:
+        '<p class="muted" style="margin:0">Gunakan file <b>MASTER DATA JAMAAH</b>, file dari tombol <b>Template</b> (jamaah baru), atau file <b>Export</b> yang sudah diedit (memperbarui data). Sheet yang berisi kolom "Nama Lengkap" dibaca otomatis.</p>' +
+        '<ul class="muted" style="margin:0;padding-left:18px;font-size:13px">' +
+          '<li>No Jamaah sudah ada → data <b>diperbarui</b> (kolom kosong tidak menghapus data lama).</li>' +
+          '<li>No Jamaah kosong → jamaah <b>baru</b> dengan nomor otomatis.</li></ul>' +
+        '<label class="drop" data-drop><i data-lucide="file-spreadsheet"></i><div><b>Pilih file</b> atau seret ke sini</div><div class="dim">.xlsx, .xls, .csv</div>' +
+          '<input type="file" accept=".csv,.xlsx,.xls" hidden data-file></label>' +
+        '<div data-preview></div>',
+      onOpen: function (form) {
+        var input = form.querySelector('[data-file]'), drop = form.querySelector('[data-drop]'), prev = form.querySelector('[data-preview]');
+        function handle(file) {
+          if (!file) return;
+          prev.innerHTML = '<p class="muted">Membaca ' + App.esc(file.name) + '…</p>';
+          parseFile(file).then(function (p) {
+            parsed = p;
+            var show = ['id_jamaah', 'nama', 'jenis_kelamin', 'desa'].filter(function (c) { return p.cols.indexOf(c) !== -1; });
+            var label = function (k) { return (COLS.filter(function (c) { return c.k === k; })[0] || {}).l || k; };
+            prev.innerHTML = '<p>Sheet <b>' + App.esc(p.sheet) + '</b>: <b>' + p.rows.length + ' baris</b> · ' + p.baru + ' baru · ' + p.update + ' diperbarui · ' + p.cols.length + ' kolom dikenali.' +
+              (p.unknown.length ? ' <span class="dim">Diabaikan: ' + App.esc(p.unknown.join(', ')) + '</span>' : '') + '</p>' +
+              '<div class="table-wrap" style="max-height:220px;box-shadow:none"><table class="table"><thead><tr>' + show.map(function (c) { return '<th>' + App.esc(label(c)) + '</th>'; }).join('') +
+              '</tr></thead><tbody>' + p.rows.slice(0, 5).map(function (r) { return '<tr>' + show.map(function (c) { return '<td>' + App.esc(r[c]) + '</td>'; }).join('') + '</tr>'; }).join('') +
+              '</tbody></table></div>' + (p.rows.length > 5 ? '<p class="dim">…dan ' + (p.rows.length - 5) + ' baris lainnya</p>' : '');
+          }).catch(function (e) { parsed = null; prev.innerHTML = '<p class="error-text">' + App.esc(e.message) + '</p>'; });
+        }
+        input.onchange = function () { handle(input.files[0]); };
+        drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('over'); });
+        drop.addEventListener('dragleave', function () { drop.classList.remove('over'); });
+        drop.addEventListener('drop', function (e) { e.preventDefault(); drop.classList.remove('over'); handle(e.dataTransfer.files[0]); });
+      },
+      onSubmit: function () {
+        if (!parsed) throw new Error('Pilih file terlebih dahulu.');
+        return App.api('importJamaah', parsed.rows);
+      }
+    }).then(function (res) {
+      if (!res) return;
+      load();
+      var html = '<p><b>' + res.added + '</b> jamaah ditambahkan, <b>' + res.updated + '</b> diperbarui.</p>';
+      function tbl(title, list, cols) {
+        return '<p style="margin-top:12px"><b>' + list.length + '</b> ' + title + ':</p><div class="table-wrap" style="max-height:220px;box-shadow:none"><table class="table"><thead><tr><th>Baris</th><th>Nama</th><th>' + cols + '</th></tr></thead><tbody>' +
+          list.map(function (s) { return '<tr><td>' + s.baris + '</td><td>' + App.esc(s.nama) + '</td><td>' + App.esc(s.alasan || s.info) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      }
+      if (res.skipped.length) html += tbl('baris dilewati', res.skipped, 'Alasan');
+      if (res.warnings.length) html += tbl('peringatan (data tetap disimpan, mohon dicek)', res.warnings, 'Peringatan');
+      App.modal({ title: 'Hasil import', html: html, okText: 'Tutup', cancelText: false });
+    });
+  }
+
+  /* ---------------- Event ---------------- */
+  var t;
+  $('#jmSearch').addEventListener('input', function () { clearTimeout(t); t = setTimeout(render, 150); });
+  ['#jmDesa', '#jmStatus', '#jmJk', '#jmLengkap'].forEach(function (s) { $(s).addEventListener('change', render); });
+  $('#jmBody').addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-id]'); if (!tr) return;
+    var rec = state.rows.filter(function (j) { return j.id_jamaah === tr.dataset.id; })[0];
+    var b = e.target.closest('button[data-act]');
+    if (!b) { if (!e.target.closest('a, input, label')) openDetail(rec); return; }   // klik baris → detail jamaah
+    if (b.dataset.act === 'edit') openForm(rec);
+    else if (b.dataset.act === 'kartu') Admin.go('kartu', { ids: [rec.id_jamaah] });
+    else toggle(rec);
+  });
+  $('#jmCards').addEventListener('click', function (e) {
+    var c = e.target.closest('.jm-card[data-id]'); if (!c) return;
+    var rec = state.rows.filter(function (j) { return j.id_jamaah === c.dataset.id; })[0];
+    if (e.target.closest('[data-act=edit]')) openForm(rec); else openDetail(rec);
+  });
+
+  Admin.register('jamaah', {
+    title: 'Data Jamaah', nav: 'Jamaah', icon: 'users', roles: ['admin', 'pendataan'],
+    init: function () { if (Admin.role === 'pendataan') $('#jmLengkap').value = 'belum'; },   // pendataan langsung ke daftar yang belum lengkap
+    show: load,
+    actions: [
+      { label: 'Import', icon: 'file-up', onClick: openImport },
+      { label: 'Export', icon: 'file-down', onClick: openExport },
+      { label: 'Template', icon: 'file-spreadsheet', onClick: openTemplate },
+      { label: 'Cetak Kartu', icon: 'id-card', onClick: function () {
+          Admin.go('kartu', { ids: filtered().filter(function (j) { return j.status === 'Aktif'; }).map(function (j) { return j.id_jamaah; }) });
+        } },
+      { label: 'Tambah Jamaah', icon: 'user-plus', cls: 'primary', roles: ['admin', 'pendataan'], onClick: function () { openForm(null); } }
+    ]
+  });
+})();
+</script>
