@@ -222,10 +222,10 @@ node dev/server.js --reset
 ```
 Buka http://localhost:8787 dan http://localhost:8787/?page=admin. Data tersimpan di `dev/.data/` (diabaikan git). Tes akhir tetap harus di Apps Script asli.
 
-## Server sendiri (VPS) — https://absensiprogram.web.id
+## Server sendiri (VPS) — https://absenjamaah.web.id
 Selain Apps Script, aplikasi juga berjalan sebagai server Node di VPS. `dev/server.js` berjalan dalam **mode produksi** (`NODE_ENV=production`, lihat `Dockerfile`), dan datanya disimpan di `data/db.json` di VPS.
 - **Deploy / update:** jalankan `bash deploy.sh` dari folder ini. Kode di-upload, container dibangun ulang, dan Caddy (HTTPS otomatis) diatur. Data di VPS tidak tertimpa.
-- **Domain:** di pengaturan DNS, buat record `A @ 31.58.103.170` dan `A www 31.58.103.170`. Sebelum domain aktif, pakai alamat cadangan `https://absensi.31-58-103-170.sslip.io`.
+- **Domain:** `absenjamaah.web.id` dan `www`, dengan DNS `A @` dan `A www` → `31.58.103.170`. Alamat cadangan: `https://absensi.31-58-103-170.sslip.io`. Untuk menambah domain lain, jalankan `bash tambah-domain.sh nama.web.id`.
 - **Keamanan mode produksi:**
   - Hanya fungsi publik di `src/*.gs` yang bisa dipanggil. Fungsi pemeliharaan pemilik, helper `_`, `include`, dan `doGet` tidak bisa dipanggil.
   - Rute `/__dev/*` mati.

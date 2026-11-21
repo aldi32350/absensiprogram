@@ -2,7 +2,7 @@
 # Upload versi terbaru Absensi Jamaah ke VPS lalu build & jalankan ulang container-nya.
 # Pakai (dari folder absensi-jamaah):  bash deploy.sh
 #
-# Alamat: https://absensiprogram.web.id (cadangan: https://absensi.<ip-vps>.sslip.io), HTTPS oleh Caddy.
+# Alamat: https://absenjamaah.web.id (cadangan: https://absensi.<ip-vps>.sslip.io), HTTPS oleh Caddy.
 # Data (db.json, foto, cadangan harian) di VPS ada di $DIR/data dan TIDAK tertimpa.
 # Hanya saat deploy pertama (data di VPS masih kosong) data dari laptop (dev/.data) ikut disalin.
 set -euo pipefail
@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 VPS="${VPS:-root@31.58.103.170}"
 KEY="${KEY:-$HOME/.ssh/pakaicloud_mmb}"
 DIR="${DIR:-/opt/absensi-program}"
-DOMAIN="${DOMAIN:-absensiprogram.web.id}"
+DOMAIN="${DOMAIN:-absenjamaah.web.id}"
 CADANGAN="${CADANGAN:-absensi.31-58-103-170.sslip.io}"
 SSH=(ssh -i "$KEY" -o BatchMode=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=15 "$VPS")
 
