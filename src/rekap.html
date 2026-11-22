@@ -1,22 +1,23 @@
 <!-- rekap.html — rekap per sesi / program / jamaah / petugas, koreksi absensi, export CSV/Excel/PDF/Drive -->
 <section id="view-rekap" hidden>
   <div class="seg rk-tabs" role="tablist">
-    <button data-rt="sesi" aria-pressed="true"><i data-lucide="calendar-check"></i>Per Sesi</button>
+    <button data-rt="pertemuan" aria-pressed="true"><i data-lucide="calendar-days"></i>Per Pertemuan</button>
+    <button data-rt="sesi"><i data-lucide="calendar-check"></i>Per Sesi</button>
     <button data-rt="program"><i data-lucide="calendar-range"></i>Per Program</button>
     <button data-rt="jamaah"><i data-lucide="user"></i>Per Jamaah</button>
     <button data-rt="petugas"><i data-lucide="badge-check"></i>Per Petugas</button>
   </div>
 
   <div class="toolbar" id="rkFilter">
-    <select class="input" id="rkProgram" data-for="sesi program"></select>
+    <select class="input" id="rkProgram" data-for="pertemuan sesi program"></select>
     <select class="input" id="rkSesi" data-for="sesi" style="flex:1 1 260px;max-width:360px"></select>
     <div class="input-wrap search" data-for="jamaah">
       <i data-lucide="search"></i>
       <input class="input" id="rkJamaah" list="rkJamaahList" placeholder="Ketik nama / ID jamaah…" autocomplete="off">
       <datalist id="rkJamaahList"></datalist>
     </div>
-    <label class="rk-date" data-for="program jamaah petugas"><span>Dari</span><input class="input" type="date" id="rkDari"></label>
-    <label class="rk-date" data-for="program jamaah petugas"><span>Sampai</span><input class="input" type="date" id="rkSampai"></label>
+    <label class="rk-date" data-for="pertemuan program jamaah petugas"><span>Dari</span><input class="input" type="date" id="rkDari"></label>
+    <label class="rk-date" data-for="pertemuan program jamaah petugas"><span>Sampai</span><input class="input" type="date" id="rkSampai"></label>
     <button class="btn primary" id="rkGo"><i data-lucide="refresh-cw"></i> Tampilkan</button>
   </div>
 
@@ -31,7 +32,7 @@
     jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
     autotable: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'
   };
-  var S = { tab: 'sesi', meta: null, sesiList: [], title: '', tables: [], last: null };
+  var S = { tab: 'pertemuan', meta: null, sesiList: [], title: '', tables: [], last: null };
 
   /* ---------------- Util tampilan ---------------- */
   function pctCell(p) {
@@ -90,7 +91,10 @@
   /* ---------------- Render per tab ---------------- */
   function run() {
     var p;
-    if (S.tab === 'sesi') {
+    if (S.tab === 'pertemuan') {
+      if (!$('#rkProgram').value) return App.toast('Pilih program dulu.', 'warn');
+      p = App.api('rekapPertemuan', $('#rkProgram').value, $('#rkDari').value, $('#rkSampai').value).then(renderPertemuan);
+    } else if (S.tab === 'sesi') {
       var sid = $('#rkSesi').value;
       if (!sid) return App.toast('Pilih sesi dulu.', 'warn');
       p = App.api('rekapSesi', sid).then(renderSesi);
@@ -105,6 +109,99 @@
       p = App.api('rekapPetugas', $('#rkDari').value, $('#rkSampai').value).then(renderPetugas);
     }
     App.busy($('#rkGo'), p).catch(function (e) { App.toast(e.message, 'err'); });
+  }
+
+  /* ---------------- Per Pertemuan (format "Rekap Pertemuan & Kehadiran Harian") ---------------- */
+  function tglPendek(t) { var p = t.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  function kpiTile(label, value, note, cls) {
+    return '<div class="pt-kpi ' + (cls || '') + '"><div class="l">' + label + '</div><div class="v">' + value + '</div><div class="n">' + note + '</div></div>';
+  }
+  function renderPertemuan(d) {
+    S.last = d;
+    var k = d.kpi, rows = d.rows;
+    S.title = 'Rekap Pertemuan ' + d.program.nama_program + ' ' + d.range.dari + ' sd ' + d.range.sampai;
+    Admin.setSubtitle(d.program.nama_program + ' · ' + App.tgl(d.range.dari) + ' – ' + App.tgl(d.range.sampai));
+    if (!rows.length) {
+      $('#rkOut').innerHTML = '<div class="card empty">Belum ada pertemuan pada periode ini. Coba ubah tanggal <b>Dari</b>.</div>';
+      S.tables = []; return;
+    }
+    var maxT = 0, minR = rows[0], maxR = rows[0];
+    rows.forEach(function (r) { maxT = Math.max(maxT, r.total); if (r.total > maxR.total) maxR = r; if (r.total < minR.total) minR = r; });
+
+    // Ringkasan dalam kalimat sehari-hari
+    var akhir = rows[rows.length - 1], sebelum = rows.length > 1 ? rows[rows.length - 2] : null;
+    var tren = sebelum ? (akhir.total > sebelum.total ? '<b class="up">naik ' + (akhir.total - sebelum.total) + ' orang</b>'
+                       : akhir.total < sebelum.total ? '<b class="down">turun ' + (sebelum.total - akhir.total) + ' orang</b>' : '<b>sama</b>') +
+                       ' dibanding pertemuan sebelumnya' : '';
+    var insight =
+      '<div class="card pt-insight"><i data-lucide="lightbulb"></i><div>' +
+        '<p>Dari <b>' + k.pertemuan + ' pertemuan</b>, rata-rata <b>' + k.rataHadir + ' jamaah</b> hadir setiap pertemuan ' +
+          '(± ' + Math.round(k.rataAnak) + ' anak/remaja dan ' + Math.round(k.rataDewasa) + ' ibu/dewasa).</p>' +
+        '<p>Paling ramai <b>' + maxR.hari + ', ' + App.tgl(maxR.tanggal) + '</b> (' + maxR.total + ' orang), paling sepi <b>' + minR.hari + ', ' + App.tgl(minR.tanggal) + '</b> (' + minR.total + ' orang).' +
+          (tren ? ' Pertemuan terakhir ' + tren + '.' : '') + '</p>' +
+        '<p><b>' + k.pctBarcode + '%</b> kehadiran tercatat dengan kartu barcode. <b>' + k.tidak + ' jamaah</b> belum pernah hadir pada periode ini.</p>' +
+        (d.berjalan ? '<p class="dim">Pertemuan hari ini (' + App.tgl(d.berjalan.tanggal) + ') masih berlangsung — sudah ' + d.berjalan.hadir + ' orang hadir, belum dihitung sampai sesinya ditutup.</p>' : '') +
+      '</div></div>';
+
+    var body = rows.map(function (r) {
+      var tag = r === maxR && rows.length > 1 ? '<span class="pt-tag hi">Tertinggi</span>' : r === minR && rows.length > 1 ? '<span class="pt-tag lo">Terendah</span>' : '';
+      var a = r.total ? r.anak / r.total * 100 : 0, w = r.total ? r.dewasa / r.total * 100 : 0;
+      return '<tr class="pt-row" data-pt-sesi="' + App.esc(r.id_sesi) + '" title="Klik untuk melihat daftar hadir tanggal ini">' +
+        '<td><b class="mono">' + tglPendek(r.tanggal) + '</b>' + tag + '</td>' +
+        '<td>' + r.hari + '</td>' +
+        '<td><div class="pt-total"><b>' + r.total + '</b><span class="pt-bar"><i style="width:' + (maxT ? r.total / maxT * 100 : 0) + '%"></i></span></div></td>' +
+        '<td class="num">' + r.anak + '</td><td class="num">' + r.dewasa + '</td>' +
+        '<td class="pt-komp"><span class="pt-split" title="Anak ' + r.anak + ' · Dewasa ' + r.dewasa + '"><i class="a" style="width:' + a + '%"></i><i class="w" style="width:' + w + '%"></i></span></td>' +
+        '<td class="num">' + r.barcode + ' <small class="dim">(' + r.pctBarcode + '%)</small></td>' +
+        '<td class="num">' + (r.tanpaBarcode ? '<b class="warn">' + r.tanpaBarcode + '</b>' : '0') + '</td>' +
+        '<td class="num">' + r.kelompok + '</td></tr>';
+    }).join('');
+    var sum = { total: 0, anak: 0, dewasa: 0, barcode: 0, tanpa: 0, kel: 0, tanpa0: 0 };
+    rows.forEach(function (r) { sum.tanpa0 += r.tanpaKategori; sum.total += r.total; sum.anak += r.anak; sum.dewasa += r.dewasa; sum.barcode += r.barcode; sum.tanpa += r.tanpaBarcode; sum.kel += r.kelompok; });
+    function rata(x) { return Math.round(x / rows.length * 10) / 10; }
+    var foot = '<tr class="pt-foot"><td colspan="2">Rata-rata / pertemuan</td><td><b>' + rata(sum.total) + '</b></td><td class="num">' + rata(sum.anak) + '</td>' +
+      '<td class="num">' + rata(sum.dewasa) + '</td><td class="pt-komp"></td><td class="num">' + rata(sum.barcode) + '</td><td class="num">' + rata(sum.tanpa) + '</td><td class="num">' + rata(sum.kel) + '</td></tr>';
+
+    $('#rkOut').innerHTML = insight +
+      '<div class="pt-sec">Keaktifan jamaah</div>' +
+      '<div class="pt-kpis k5">' +
+        kpiTile('Total jamaah', k.total, 'Peserta ' + App.esc(d.program.nama_program.split(' - ')[0]), 'hero') +
+        kpiTile('Jamaah aktif', k.aktif, '≥ ' + k.batas + '× pertemuan (' + k.aktifPct + '%)', 'ok') +
+        kpiTile('Jamaah sedang', k.sedang, '1–' + (k.batas - 1) + '× pertemuan (' + k.sedangPct + '%)', 'mid') +
+        kpiTile('Tidak aktif', k.tidak, '0× hadir (' + k.tidakPct + '%)', 'bad') +
+        kpiTile('Rata-rata hadir', k.rataHadir, 'per pertemuan (tanggal)', '') +
+      '</div>' +
+      '<div class="pt-sec">Pertemuan</div>' +
+      '<div class="pt-kpis k4">' +
+        kpiTile('Total hari pertemuan', k.pertemuan + ' <small>hari</small>', 'pertemuan terlaksana', '') +
+        kpiTile('Rata-rata hadir / pertemuan', k.rataHadir, 'rata-rata ' + Math.round(k.rataAnak) + ' anak · ' + Math.round(k.rataDewasa) + ' ibu/dewasa', '') +
+        kpiTile('Rata-rata pakai barcode', k.rataBarcode, 'dari ' + k.rataHadir + ' jamaah hadir (' + k.pctBarcode + '%)', '') +
+        kpiTile('Rata-rata kelompok hadir', k.rataKelompok, 'kelompok / kelas per pertemuan', '') +
+      '</div>' +
+      '<div class="card panel"><div class="panel-head"><h2>Kehadiran per tanggal</h2><span class="dim">klik baris untuk melihat siapa saja yang hadir</span></div>' +
+        '<div class="table-wrap" style="box-shadow:none;border-radius:12px"><table class="table pt-table"><thead><tr>' +
+          '<th>Tanggal</th><th>Hari</th><th>Total hadir</th><th class="num">Anak &amp; remaja</th><th class="num">Ibu &amp; dewasa</th>' +
+          '<th class="pt-komp">Komposisi</th><th class="num">Pakai barcode</th><th class="num">Tanpa barcode</th><th class="num">Kelompok hadir</th>' +
+        '</tr></thead><tbody>' + body + foot + '</tbody></table></div>' +
+        '<p class="dim pt-legend"><span class="pt-dot a"></span> Anak &amp; remaja <span class="pt-dot w"></span> Ibu &amp; dewasa · kategori diambil dari kelas fasilitator (atau usia bila belum punya kelas)' +
+          (sum.tanpa0 ? ' · rata-rata ' + Math.round(sum.tanpa0 / rows.length) + ' jamaah/pertemuan belum punya kelas &amp; tanggal lahir, jadi belum masuk kategori' : '') + '</p>' +
+      '</div>';
+
+    S.tables = [
+      { name: 'Per Pertemuan', headers: ['Tanggal', 'Hari', 'Total Hadir', 'Anak & Remaja', 'Ibu & Dewasa', 'Pakai Barcode', 'Tanpa Barcode', 'Kelompok Hadir'],
+        rows: rows.map(function (r) { return [tglPendek(r.tanggal), r.hari, r.total, r.anak, r.dewasa, r.barcode, r.tanpaBarcode, r.kelompok]; })
+          .concat([['Rata-rata', '', rata(sum.total), rata(sum.anak), rata(sum.dewasa), rata(sum.barcode), rata(sum.tanpa), rata(sum.kel)]]) },
+      { name: 'Keaktifan Jamaah', headers: ['No Jamaah', 'Nama', 'Kelompok / Desa', 'Jumlah Hadir', 'Kategori'],
+        rows: [].concat(
+          k.daftar.aktif.map(function (x) { return x.concat(['Aktif']); }),
+          k.daftar.sedang.map(function (x) { return x.concat(['Sedang']); }),
+          k.daftar.tidak.map(function (x) { return x.concat(['Tidak aktif']); })) }
+    ];
+    App.icons();
+  }
+  function bukaSesi(idSesi) {
+    S.tab = 'sesi'; syncFilter();
+    loadSesiOptions().then(function () { $('#rkSesi').value = idSesi; run(); window.scrollTo(0, 0); });
   }
 
   function renderSesi(d) {
@@ -286,6 +383,7 @@
     if ((b = e.target.closest('[data-edit]'))) koreksi(b.dataset.edit);
     else if ((b = e.target.closest('[data-del]'))) hapus(b.dataset.del);
     else if ((b = e.target.closest('[data-mark]'))) tandai(b.dataset.mark);
+    else if ((b = e.target.closest('tr[data-pt-sesi]'))) bukaSesi(b.dataset.ptSesi);
   });
 
   /* ---------------- Export ---------------- */
@@ -355,10 +453,11 @@
       S.tab = b.dataset.rt; S.tables = []; syncFilter();
       $('#rkOut').innerHTML = '<div class="card empty">Pilih filter lalu tekan <b>Tampilkan</b>.</div>';
       Admin.setSubtitle('Rekap kehadiran & export laporan');
-      if (S.tab === 'petugas') run();
+      if (S.tab === 'petugas' || S.tab === 'pertemuan') run();
     });
   });
-  $('#rkProgram').addEventListener('change', function () { loadSesiOptions().then(function () { if (S.tab === 'sesi') run(); }); });
+  $('#rkProgram').addEventListener('change', function () { loadSesiOptions().then(function () { if (S.tab === 'sesi' || S.tab === 'pertemuan') run(); }); });
+  ['#rkDari', '#rkSampai'].forEach(function (id) { $(id).addEventListener('change', function () { if (S.tab === 'pertemuan') run(); }); });
   $('#rkSesi').addEventListener('change', run);
   $('#rkGo').addEventListener('click', run);
   $('#rkJamaah').addEventListener('change', function () { if (jamaahIdFromInput()) run(); });
@@ -391,7 +490,7 @@
           $('#rkProgram').value = arg.program;
           return loadSesiOptions().then(function () { $('#rkSesi').value = arg.sesi; run(); });
         }
-        if (S.tab === 'sesi' && $('#rkSesi').value) run();
+        if ((S.tab === 'sesi' && $('#rkSesi').value) || S.tab === 'pertemuan') run();
       }).catch(function (e) { App.toast(e.message, 'err'); }).finally(function () { App.loading(false); });
     }
   });

@@ -213,6 +213,102 @@ function rekapProgram(token, idProgram, dari, sampai) {
   });
 }
 
+/**
+ * Per PERTEMUAN (tanggal) satu program — format "Rekap Pertemuan & Kehadiran Harian":
+ * total hadir, anak/remaja vs ibu/dewasa, pakai kartu barcode vs tanpa barcode, jumlah kelompok (kelas) yang hadir,
+ * ditambah KPI keaktifan jamaah (aktif ≥ 3×, sedang 1–2×, tidak aktif 0×) pada periode yang sama.
+ */
+var METODE_BARCODE = ['Scan Kamera', 'Scanner', 'Google Form'];
+function rekapPertemuan(token, idProgram, dari, sampai) {
+  return respond_(function () {
+    requireAuth_(token, 'admin');
+    var range = range_(dari, sampai);
+    var db = loadRekapDb_();
+    var p = db.program[idProgram];
+    if (!p) throw new Error('Program tidak ditemukan.');
+    var today = today_();
+    var sesi = db.sesi.filter(function (s) {
+      return s.id_program === idProgram && s.tanggal >= range.dari && s.tanggal <= range.sampai && s.tanggal <= today;
+    });
+    var tglSesi = {}, sesiPertama = {};
+    sesi.forEach(function (s) {
+      tglSesi[s.id_sesi] = s.tanggal;
+      if (!sesiPertama[s.tanggal] || (s.jam_mulai || '') < (sesiPertama[s.tanggal].jam || '')) sesiPertama[s.tanggal] = { id: s.id_sesi, jam: s.jam_mulai };
+    });
+
+    // Kategori jamaah: dari kelas fasilitatornya; bila belum punya kelas → dari usia (< 21 th = anak/remaja).
+    var katFasil = {};
+    readAll_('FASILITATOR').forEach(function (f) { katFasil[f.nama] = f.kategori || ''; });
+    function anak(j, tgl) {
+      var k = j && katFasil[j.kelompok];
+      if (k) return k === 'Remaja & Anak';
+      if (!j || !j.tanggal_lahir) return null;
+      var a = j.tanggal_lahir.split('-'), b = tgl.split('-');
+      var u = +b[0] - +a[0] - ((+b[1] < +a[1] || (+b[1] === +a[1] && +b[2] < +a[2])) ? 1 : 0);
+      return u < 21;
+    }
+
+    var per = {};       // tanggal → { id_jamaah: absensi }
+    db.absensi.forEach(function (a) {
+      var t = tglSesi[a.id_sesi];
+      if (!t || a.status !== 'Hadir') return;
+      per[t] = per[t] || {};
+      if (!per[t][a.id_jamaah]) per[t][a.id_jamaah] = a;
+    });
+    var HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    function ditutup(t) { return sesi.some(function (s) { return s.tanggal === t && s.status === 'Ditutup'; }); }
+    // Pertemuan hari ini yang sesinya masih dibuka belum dihitung (angkanya masih bertambah).
+    var berjalan = sesiPertama[today] && !ditutup(today) ? { tanggal: today, hadir: Object.keys(per[today] || {}).length } : null;
+    var rows = Object.keys(sesiPertama).filter(function (t) {
+      return (per[t] || ditutup(t)) && !(berjalan && t === today);
+    }).sort().map(function (t) {
+      var hadir = per[t] || {}, ids = Object.keys(hadir);
+      var r = { tanggal: t, hari: HARI[new Date(t + 'T12:00:00Z').getUTCDay()], id_sesi: sesiPertama[t].id, jam: sesiPertama[t].jam || '',
+                total: ids.length, anak: 0, dewasa: 0, tanpaKategori: 0, barcode: 0, tanpaBarcode: 0, kelompok: 0 };
+      var kel = {};
+      ids.forEach(function (id) {
+        var j = db.jamaah[id], k = anak(j, t);
+        if (k === true) r.anak++; else if (k === false) r.dewasa++; else r.tanpaKategori++;
+        if (METODE_BARCODE.indexOf(hadir[id].metode) !== -1) r.barcode++; else r.tanpaBarcode++;
+        if (j && j.kelompok) kel[j.kelompok] = true;
+      });
+      r.kelompok = Object.keys(kel).length;
+      r.pctBarcode = r.total ? Math.round(r.barcode / r.total * 100) : 0;
+      return r;
+    });
+
+    // KPI keaktifan jamaah pada periode ini
+    var hadirTgl = {};
+    rows.forEach(function (r) { Object.keys(per[r.tanggal] || {}).forEach(function (id) { hadirTgl[id] = (hadirTgl[id] || 0) + 1; }); });
+    var populasi = pesertaProgram_(p, db.jamaahList);
+    var inPop = {}; populasi.forEach(function (j) { inPop[j.id_jamaah] = true; });
+    Object.keys(hadirTgl).forEach(function (id) { if (!inPop[id] && db.jamaah[id]) { populasi.push(db.jamaah[id]); inPop[id] = true; } });
+    var kat = { aktif: [], sedang: [], tidak: [] };
+    populasi.forEach(function (j) {
+      var n = hadirTgl[j.id_jamaah] || 0;
+      (n >= BATAS_AKTIF ? kat.aktif : n >= 1 ? kat.sedang : kat.tidak).push([j.id_jamaah, j.nama, j.kelompok || j.desa || '', n]);
+    });
+    Object.keys(kat).forEach(function (k) { kat[k].sort(function (a, b) { return b[3] - a[3] || a[1].localeCompare(b[1]); }); });
+    var n = rows.length;
+    function avg(key) { var s = 0; rows.forEach(function (r) { s += r[key]; }); return n ? Math.round(s / n * 10) / 10 : 0; }
+    var totalHadir = 0, totalBarcode = 0;
+    rows.forEach(function (r) { totalHadir += r.total; totalBarcode += r.barcode; });
+    var pop = populasi.length;
+    function pct(x) { return pop ? Math.round(x / pop * 100) : 0; }
+    return {
+      program: { id_program: p.id_program, nama_program: p.nama_program }, range: range, berjalan: berjalan,
+      kpi: {
+        total: pop, aktif: kat.aktif.length, aktifPct: pct(kat.aktif.length), sedang: kat.sedang.length, sedangPct: pct(kat.sedang.length),
+        tidak: kat.tidak.length, tidakPct: pct(kat.tidak.length), batas: BATAS_AKTIF,
+        pertemuan: n, rataHadir: avg('total'), rataAnak: avg('anak'), rataDewasa: avg('dewasa'),
+        rataBarcode: avg('barcode'), pctBarcode: totalHadir ? Math.round(totalBarcode / totalHadir * 100) : 0,
+        rataKelompok: avg('kelompok'), daftar: kat
+      },
+      rows: rows
+    };
+  });
+}
+
 /** Per jamaah: persentase kehadiran per program + riwayat. */
 function rekapJamaah(token, idJamaah, dari, sampai) {
   return respond_(function () {
