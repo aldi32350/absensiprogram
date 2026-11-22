@@ -83,9 +83,12 @@ Tugasnya melengkapi data master jamaah (foto, tanggal lahir, alamat, KK, dll.) d
 ---
 
 ## 📖 Untuk FASILITATOR
+> Akun fasilitator dibuat **per orang** oleh admin di **Kelola User** (nama lengkap, username, password). Admin memasangkan 2 fasilitator dalam satu **kelas** di menu **Fasilitator**.
+
 1. Login dengan username + password dari admin.
 2. **Pilih sesi hari ini** (sesi dibuka oleh petugas absensi), lalu tekan **Mulai di sesi ini**. Bila belum ada sesi, tekan *Muat ulang* setelah petugas membuka sesi (atau *Lanjut tanpa sesi* untuk laporan saja).
-3. Di setiap jamaah binaan terlihat status kehadirannya di sesi itu (*Hadir · scan kartu*, *Hadir · oleh fasilitator*, atau *Belum absen*).
+3. Ketuk nama jamaah untuk melihat **detail lengkap** (foto, data diri, alamat, KK, total hadir, riwayat laporan) — data diisi admin / tim pendataan (hanya-baca).
+4. Di setiap jamaah binaan terlihat status kehadirannya di sesi itu (*Hadir · scan kartu*, *Hadir · oleh fasilitator*, atau *Belum absen*).
    - **Tandai Hadir** → jamaah tercatat HADIR (dobel dengan scan petugas supaya tidak ada yang terlewat; tidak pernah tercatat dua kali).
    - **Laporkan** → isi indikator (Iqro' 1 … Qur'an Besar), **Tetap / Lanjut**, keterangan → **Kirim** → **Ya**. Jamaah yang dilaporkan **otomatis tercatat HADIR** di sesi tersebut.
 4. Filter: *Belum absen / Sudah hadir*, Tetap / Lanjut / belum dilaporkan, indikator, dan kolom cari. **Ganti sesi** di kartu atas.

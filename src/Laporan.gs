@@ -11,11 +11,23 @@ var INDIKATOR_JAMAAH = ["Iqro' 1", "Iqro' 2", "Iqro' 3", "Iqro' 4", "Iqro' 5", "
                         "Qur'an Kecil", "Qur'an Sedang", "Qur'an Besar"];
 var KEPUTUSAN_LAPORAN = ['Tetap', 'Lanjut'];
 
+/**
+ * Fasilitator yang login (s.id = id_petugas) + kelas yang dipegangnya.
+ * f = { id_fasilitator: id_petugas, nama } dipakai saat mencatat absensi; kelasByNama = { nama kelas: baris kelas }.
+ */
+function fasilSaya_(s) {
+  var u = findBy_('PETUGAS', 'id_petugas', s.id);
+  var kelas = kelasMilik_(s.id);
+  var byNama = {};
+  kelas.forEach(function (k) { byNama[k.nama] = k; });
+  return { user: u, f: { id_fasilitator: s.id, nama: u ? u.nama : s.nama }, kelas: kelas, kelasByNama: byNama };
+}
+
 /** Beranda fasilitator: sesi hari ini (untuk dipilih), jamaah binaan + laporan terakhir + status hadir di sesi terpilih. */
 function fasilitatorHome(token, idSesi) {
   return respond_(function () {
     var s = requireAuth_(token, 'fasilitator');
-    var f = findBy_('FASILITATOR', 'id_fasilitator', s.id);
+    var me = fasilSaya_(s);
     var today = today_();
     var last = laporanTerakhir_();
     var thumbs = thumbMap_();
@@ -35,7 +47,7 @@ function fasilitatorHome(token, idSesi) {
     if (sesi) absensi.forEach(function (a) {
       if (a.id_sesi === sesi.id_sesi) hadir[a.id_jamaah] = { status: a.status, waktu: a.waktu_scan, metode: a.metode };
     });
-    var rows = readAll_('DATA_JAMAAH').filter(function (j) { return j.kelompok === f.nama && j.status === 'Aktif'; })
+    var rows = readAll_('DATA_JAMAAH').filter(function (j) { return me.kelasByNama[j.kelompok] && j.status === 'Aktif'; })
       .sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); })
       .map(function (j) {
         var l = last[j.id_jamaah] || null;
@@ -43,10 +55,17 @@ function fasilitatorHome(token, idSesi) {
           id_jamaah: j.id_jamaah, nama: j.nama, nama_panggilan: j.nama_panggilan, jenis_kelamin: j.jenis_kelamin,
           tanggal_lahir: j.tanggal_lahir, desa: j.desa, rt: j.rt, rw: j.rw, no_hp: j.no_hp, thumb: thumbs[j.id_jamaah] || '',
           terakhir: l ? { tanggal: l.tanggal, indikator: l.indikator, keputusan: l.keputusan, keterangan: l.keterangan, nama_fasilitator: l.nama_fasilitator } : null,
-          absen: hadir[j.id_jamaah] || null
+          absen: hadir[j.id_jamaah] || null,
+          kelas: me.kelasByNama[j.kelompok].kelas || ''
         };
       });
-    return { fasilitator: publicFasil_(f), indikator: INDIKATOR_JAMAAH, keputusan: KEPUTUSAN_LAPORAN, rows: rows, today: today,
+    var k0 = me.kelas[0] || {};
+    var pasangan = function (k) { return [k.anggota_1, k.anggota_2].filter(function (id) { return id && id !== s.id; }); };
+    var namaUser = {}; readAll_('PETUGAS').forEach(function (p) { namaUser[p.id_petugas] = p.nama; });
+    return { fasilitator: { nama: me.f.nama, kelas: k0.kelas || '', kategori: k0.kategori || '',
+               kelasList: me.kelas.map(function (k) { return { id_fasilitator: k.id_fasilitator, kelas: k.kelas, kategori: k.kategori, nama: k.nama,
+                 pasangan: pasangan(k).map(function (id) { return namaUser[id] || ''; }).filter(String) }; }) },
+             indikator: INDIKATOR_JAMAAH, keputusan: KEPUTUSAN_LAPORAN, rows: rows, today: today,
              sesiHariIni: sesiHariIni, sesi: sesi };
   });
 }
@@ -79,11 +98,11 @@ function fasilitatorTandaiHadir(token, idSesi, idJamaah) {
   return respond_(function () {
     var s = requireAuth_(token, 'fasilitator');
     return withLock_(function () {
-      var f = findBy_('FASILITATOR', 'id_fasilitator', s.id);
+      var me = fasilSaya_(s);
       var j = findBy_('DATA_JAMAAH', 'id_jamaah', clean_(idJamaah).toUpperCase());
       if (!j || j.status !== 'Aktif') throw new Error('Jamaah tidak ditemukan / nonaktif.');
-      if (j.kelompok !== f.nama) throw new Error('Jamaah ini bukan binaan Anda. Hubungi admin.');
-      var r = catatHadirFasil_(f, clean_(idSesi), j);
+      if (!me.kelasByNama[j.kelompok]) throw new Error('Jamaah ini bukan binaan Anda. Hubungi admin.');
+      var r = catatHadirFasil_(me.f, clean_(idSesi), j);
       if (r.baru) logActivity_(s.username, s.role, 'Tandai HADIR ' + j.id_jamaah + ' di sesi ' + idSesi);
       return r;
     });
@@ -105,15 +124,16 @@ function simpanLaporanFasilitator(token, data) {
     if (INDIKATOR_JAMAAH.indexOf(rec.indikator) === -1) throw new Error('Pilih indikator jamaah.');
     if (KEPUTUSAN_LAPORAN.indexOf(rec.keputusan) === -1) throw new Error('Pilih Tetap atau Lanjut.');
     return withLock_(function () {
-      var f = findBy_('FASILITATOR', 'id_fasilitator', s.id);
+      var me = fasilSaya_(s), f = me.f;
       var j = findBy_('DATA_JAMAAH', 'id_jamaah', idJ);
       if (!j || j.status !== 'Aktif') throw new Error('Jamaah tidak ditemukan / nonaktif.');
-      if (j.kelompok !== f.nama) throw new Error('Jamaah ini bukan binaan Anda. Hubungi admin.');
+      var kelasJ = me.kelasByNama[j.kelompok];
+      if (!kelasJ) throw new Error('Jamaah ini bukan binaan Anda. Hubungi admin.');
       rec.id_laporan = nextId_('LAPORAN_FASILITATOR', 'id_laporan', 'LAP', 6);
       rec.tanggal = today_();
       rec.waktu = now_();
-      rec.id_fasilitator = f.id_fasilitator;
-      rec.nama_fasilitator = f.nama;
+      rec.id_fasilitator = kelasJ.id_fasilitator;   // kelas (dipakai filter rekap)
+      rec.nama_fasilitator = f.nama;                // orang yang melapor
       rec.id_jamaah = j.id_jamaah;
       rec.nama_jamaah = j.nama;
       rec.id_sesi = clean_(data.id_sesi);
@@ -127,14 +147,27 @@ function simpanLaporanFasilitator(token, data) {
   });
 }
 
+/** Detail lengkap satu jamaah binaan (hanya-baca) — data yang diisi admin / tim pendataan. */
+function detailJamaahFasilitator(token, idJamaah) {
+  return respond_(function () {
+    var s = requireAuth_(token, 'fasilitator');
+    var j = findBy_('DATA_JAMAAH', 'id_jamaah', clean_(idJamaah).toUpperCase());
+    if (!j || !fasilSaya_(s).kelasByNama[j.kelompok]) throw new Error('Jamaah ini bukan binaan Anda.');
+    var o = strip_(j);
+    o.usia = usiaDari_(j.tanggal_lahir);
+    o.jumlah_hadir = readAll_('ABSENSI').filter(function (a) { return a.id_jamaah === j.id_jamaah && a.status === 'Hadir'; }).length;
+    return o;
+  });
+}
+
 /** Riwayat laporan satu jamaah (terbaru dulu). Fasilitator: hanya jamaah binaannya. Admin: semua. */
 function riwayatLaporanJamaah(token, idJamaah) {
   return respond_(function () {
     var s = requireAuth_(token, 'any');
     idJamaah = clean_(idJamaah).toUpperCase();
     if (s.role === 'fasilitator') {
-      var f = findBy_('FASILITATOR', 'id_fasilitator', s.id), j = findBy_('DATA_JAMAAH', 'id_jamaah', idJamaah);
-      if (!j || j.kelompok !== f.nama) throw new Error('Jamaah ini bukan binaan Anda.');
+      var j = findBy_('DATA_JAMAAH', 'id_jamaah', idJamaah);
+      if (!j || !fasilSaya_(s).kelasByNama[j.kelompok]) throw new Error('Jamaah ini bukan binaan Anda.');
     } else if (s.role !== 'admin') {
       throw new Error('Akses ditolak untuk jenis akun ini.');
     }

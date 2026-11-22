@@ -99,8 +99,8 @@ function fotoFolder_() {
 
 /** { id_jamaah: true } untuk jamaah binaan seorang fasilitator. */
 function binaanSet_(idFasilitator) {
-  var f = findBy_('FASILITATOR', 'id_fasilitator', idFasilitator), set = {};
-  if (!f) return set;
-  readAll_('DATA_JAMAAH').forEach(function (j) { if (j.kelompok === f.nama) set[j.id_jamaah] = true; });
+  var nama = {}, set = {};
+  kelasMilik_(idFasilitator).forEach(function (k) { nama[k.nama] = true; });
+  readAll_('DATA_JAMAAH').forEach(function (j) { if (nama[j.kelompok]) set[j.id_jamaah] = true; });
   return set;
 }

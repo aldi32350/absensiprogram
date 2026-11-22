@@ -91,26 +91,7 @@ function loginPendataan(username, pin) {
 }
 
 /** Login FASILITATOR (melaporkan perkembangan jamaah binaan) — username + PIN, di halaman Admin → tab Fasilitator. */
-function loginFasilitator(username, pin) {
-  return respond_(function () {
-    username = clean_(username).toLowerCase();
-    pin = clean_(pin);
-    if (!username || !pin) throw new Error('Username dan PIN wajib diisi.');
-    if (!/^\d{4,6}$/.test(pin)) throw new Error('PIN harus 4–6 angka.');
-    checkLoginBlock_('fasilitator', username);
-    var f = findBy_('FASILITATOR', 'username', username);
-    if (!f || !f.pin_hash || f.pin_hash !== hash_(pin, f.salt)) {
-      registerLoginFail_('fasilitator', username);
-      logActivity_(username, 'fasilitator', 'Login fasilitator GAGAL');
-      throw new Error('Username atau PIN salah.');
-    }
-    if (f.status !== 'Aktif') throw new Error('Akun fasilitator nonaktif. Hubungi admin.');
-    clearLoginFail_('fasilitator', username);
-    var sess = createSession_({ role: 'fasilitator', id: f.id_fasilitator, nama: f.nama, username: f.username });
-    logActivity_(f.username, 'fasilitator', 'Login fasilitator');
-    return sess;
-  });
-}
+function loginFasilitator(username, pin) { return login(username, pin); }   // versi lama → login tunggal
 
 /**
  * SATU login untuk semua akun: username + password. Peran ditentukan oleh akunnya (diatur admin di Kelola User):
@@ -123,6 +104,7 @@ function login(username, password) {
     password = String(password === null || password === undefined ? '' : password);
     if (!username || !password) throw new Error('Username dan password wajib diisi.');
     checkLoginBlock_('user', username);
+    withLock_(migrasiAkunFasilitator_);   // akun pasangan lama → akun per orang (sekali saja)
     function gagal() {
       registerLoginFail_('user', username);
       logActivity_(username, '-', 'Login GAGAL');
@@ -135,18 +117,11 @@ function login(username, password) {
       sess = createSession_({ role: 'admin', id: adm.id_admin, nama: adm.nama, username: adm.username });
     } else {
       var p = findBy_('PETUGAS', 'username', username);
-      if (p) {
-        if (p.pin_hash !== hash_(password, p.salt)) gagal();
-        if (p.status !== 'Aktif') throw new Error('Akun nonaktif. Hubungi admin.');
-        sess = p.jenis === 'pendataan'
-          ? createSession_({ role: 'pendataan', id: p.id_petugas, nama: p.nama, username: p.username })
-          : createSession_({ role: 'petugas', id: p.id_petugas, nama: p.nama, username: p.username, programs: splitList_(p.program_ids) });
-      } else {
-        var f = findBy_('FASILITATOR', 'username', username);
-        if (!f || !f.pin_hash || f.pin_hash !== hash_(password, f.salt)) gagal();
-        if (f.status !== 'Aktif') throw new Error('Akun nonaktif. Hubungi admin.');
-        sess = createSession_({ role: 'fasilitator', id: f.id_fasilitator, nama: f.nama, username: f.username });
-      }
+      if (!p || p.pin_hash !== hash_(password, p.salt)) gagal();
+      if (p.status !== 'Aktif') throw new Error('Akun nonaktif. Hubungi admin.');
+      sess = p.jenis === 'pendataan' ? createSession_({ role: 'pendataan', id: p.id_petugas, nama: p.nama, username: p.username })
+        : p.jenis === 'fasilitator' ? createSession_({ role: 'fasilitator', id: p.id_petugas, nama: p.nama, username: p.username })
+        : createSession_({ role: 'petugas', id: p.id_petugas, nama: p.nama, username: p.username, programs: splitList_(p.program_ids) });
     }
     clearLoginFail_('user', username);
     logActivity_(sess.username, sess.role, 'Login');
@@ -241,12 +216,12 @@ function requireAuth_(token, role, idProgram) {
     throw new Error('AUTH:FORBIDDEN:Akses ditolak untuk jenis akun ini.');
   }
   if (s.role === 'fasilitator') {
-    var fs = findBy_('FASILITATOR', 'id_fasilitator', s.id);
-    if (!fs || fs.status !== 'Aktif' || !fs.pin_hash) {
+    var fp = findBy_('PETUGAS', 'id_petugas', s.id);
+    if (!fp || fp.status !== 'Aktif' || fp.jenis !== 'fasilitator') {
       destroySession_(token);
-      throw new Error('AUTH:EXPIRED:Akun fasilitator nonaktif.');
+      throw new Error('AUTH:EXPIRED:Akun fasilitator nonaktif. Silakan login ulang.');
     }
-    s.nama = fs.nama;   // nama terbaru (bila admin mengganti nama)
+    s.nama = fp.nama;   // nama terbaru (bila admin mengganti nama)
   }
   if ((role === 'pendataan' && s.role === 'petugas') || (role === 'petugas' && s.role === 'pendataan')) {
     logActivity_(s.username, s.role, 'DITOLAK: akses fungsi ' + role);
@@ -263,7 +238,7 @@ function requireAuth_(token, role, idProgram) {
   if (role === 'petugas' && s.role === 'petugas') {
     // Status & penugasan dicek ulang dari sheet agar perubahan admin langsung berlaku.
     var p = findBy_('PETUGAS', 'id_petugas', s.id);
-    if (!p || p.status !== 'Aktif' || p.jenis === 'pendataan') {   // akun diubah jadi pendataan → sesi absensi berakhir
+    if (!p || p.status !== 'Aktif' || p.jenis === 'pendataan' || p.jenis === 'fasilitator') {   // akun diubah perannya → sesi absensi berakhir
       destroySession_(token);
       throw new Error('AUTH:EXPIRED:Akun petugas nonaktif.');
     }

@@ -4,30 +4,31 @@
 <section id="view-lapor" hidden>
   <!-- Langkah 1: pilih sesi hari ini (seperti petugas) -->
   <div id="lpPilih" hidden></div>
-  <!-- Langkah 2: jamaah binaan — absen HADIR + laporan perkembangan -->
+  <!-- Langkah 2: jamaah kelas — absen HADIR, detail, & laporan perkembangan -->
   <div id="lpMain" hidden>
-    <div class="lp-sesi card" id="lpSesi"></div>
-    <div class="lp-hello glass card" id="lpHello"></div>
-    <div class="toolbar lp-toolbar">
+    <div class="fx-hero" id="lpHello"></div>
+    <div class="fx-sesi" id="lpSesi"></div>
+    <div class="fx-filter">
       <div class="input-wrap search">
         <i data-lucide="search"></i>
         <input class="input" id="lpSearch" type="search" placeholder="Cari nama jamaah / No Jamaah…" autocomplete="off">
       </div>
-      <select class="input" id="lpAbsen" title="Filter kehadiran">
-        <option value="">Semua kehadiran</option>
-        <option value="belum">Belum absen</option>
-        <option value="hadir">Sudah hadir</option>
-      </select>
-      <select class="input" id="lpKeputusan" title="Filter Tetap / Lanjut">
-        <option value="">Tetap &amp; Lanjut</option>
+      <div class="fx-seg" id="lpAbsenSeg" role="group" aria-label="Filter kehadiran">
+        <button type="button" data-ab="" class="on">Semua</button>
+        <button type="button" data-ab="belum">Belum absen</button>
+        <button type="button" data-ab="hadir">Hadir</button>
+      </div>
+      <select class="input" id="lpKeputusan" title="Filter laporan">
+        <option value="">Semua laporan</option>
         <option value="Tetap">Tetap</option>
         <option value="Lanjut">Lanjut</option>
-        <option value="__belum">Belum dilaporkan</option>
+        <option value="__belum">Belum pernah dilaporkan</option>
         <option value="__hariini">Belum dilaporkan hari ini</option>
       </select>
       <select class="input" id="lpIndikator" title="Filter indikator"><option value="">Semua indikator</option></select>
     </div>
-    <div class="lp-cards" id="lpCards"><div class="glass card empty">Memuat…</div></div>
+    <div class="fx-count dim" id="lpCount"></div>
+    <div class="fx-list" id="lpCards"><div class="card empty">Memuat…</div></div>
   </div>
 </section>
 
@@ -95,10 +96,10 @@
   }
 
   /* =====================================================================
-   * FASILITATOR: pilih sesi hari ini → jamaah binaan (absen HADIR + laporan)
+   * FASILITATOR: pilih sesi hari ini → jamaah kelasnya (absen HADIR, detail, laporan)
    * Absen fasilitator = cadangan scan petugas (dobel), tidak pernah tercatat dua kali.
    * ===================================================================== */
-  var F = { rows: [], today: '', sesi: null, sesiHariIni: [], tanpaSesi: false, timer: null };
+  var F = { rows: [], today: '', sesi: null, sesiHariIni: [], tanpaSesi: false, ab: '' };
   var K_SESI = 'fasil_sesi';
 
   function sesiTersimpan() {
@@ -106,6 +107,7 @@
     return v && v.tanggal === App.today() ? v.id : '';
   }
   function bisaCatat() { return !!(F.sesi && F.sesi.status === 'Dibuka'); }
+  function namaDepan() { return (((App.session || {}).nama || (F.fasil || {}).nama || '').split(' ')[0]) || 'Fasilitator'; }
 
   function loadLapor(diam) {
     if (!diam) App.loading(true);
@@ -117,27 +119,36 @@
       .finally(function () { if (!diam) App.loading(false); });
   }
 
+  function kelasInfo() {
+    var ks = (F.fasil && F.fasil.kelasList) || [];
+    if (!ks.length) return '<div class="fx-kelas"><span class="warn-chip">Belum punya kelas — hubungi admin</span></div>';
+    return ks.map(function (k) {
+      return '<div class="fx-kelas">' + indChip(k.kelas) + (k.kategori ? '<span class="fx-kat">' + esc(k.kategori) + '</span>' : '') +
+        (k.pasangan.length ? '<span class="fx-pas"><i data-lucide="users"></i>bersama ' + esc(k.pasangan.join(', ')) + '</span>' : '') + '</div>';
+    }).join('');
+  }
+
   /* ---------- Langkah 1: pilih sesi ---------- */
   function renderPilih() {
     $('#lpMain').hidden = true; $('#lpPilih').hidden = false;
     if (Admin.current === 'lapor') Admin.setSubtitle('Pilih sesi hari ini dulu');
     var list = F.sesiHariIni;
     $('#lpPilih').innerHTML =
-      '<div class="lp-pilih-head"><div class="lp-hello-t">Assalamu\'alaikum, ' + esc(((App.session || {}).nama || '').split(' ')[0] || 'Fasilitator') + '</div>' +
-        '<div class="dim">' + esc(App.tgl(F.today || App.today(), true)) + ' · pilih sesi untuk mulai absen &amp; laporan jamaah binaan</div></div>' +
+      '<div class="fx-hero"><div class="fx-hero-top"><div class="fx-ava">' + esc(namaDepan().charAt(0).toUpperCase()) + '</div><div>' +
+        '<div class="fx-hi">Assalamu\'alaikum, ' + esc(namaDepan()) + '</div>' +
+        '<div class="fx-date">' + esc(App.tgl(F.today || App.today(), true)) + '</div></div></div>' + kelasInfo() + '</div>' +
+      '<div class="fx-step"><span>1</span> Pilih sesi hari ini untuk mulai absen &amp; laporan</div>' +
       (list.length ? list.map(function (s) {
         var buka = s.status === 'Dibuka';
-        return '<div class="card prog-tile lp-sesi-pilih">' +
-          '<div class="pt-top"><div class="pt-ic"><i data-lucide="calendar-check"></i></div>' +
-          '<div class="grow"><div class="pt-name">' + esc(s.nama_program) + '</div>' +
-          '<div class="pt-sub">' + (s.jam_mulai ? 'Mulai ' + esc(s.jam_mulai) + ' · ' : '') + s.hadir + ' hadir · ' +
-            (buka ? '<b class="ok">Sedang dibuka</b>' : '<b class="bad">Sudah ditutup</b>') + '</div></div></div>' +
-          '<button class="btn ' + (buka ? 'primary' : '') + ' xl block" data-pilih="' + esc(s.id_sesi) + '"><i data-lucide="' + (buka ? 'log-in' : 'eye') + '"></i> ' +
-            (buka ? 'Mulai di sesi ini' : 'Lihat sesi ini') + '</button></div>';
+        return '<div class="fx-sesi-opt' + (buka ? ' on' : '') + '">' +
+          '<div class="fx-sesi-ic"><i data-lucide="calendar-check"></i></div>' +
+          '<div class="grow"><b>' + esc(s.nama_program) + '</b><div class="dim">' + (s.jam_mulai ? 'Mulai ' + esc(s.jam_mulai) + ' · ' : '') + s.hadir + ' jamaah hadir</div></div>' +
+          '<span class="fx-status ' + (buka ? 'on' : 'off') + '">' + (buka ? 'Dibuka' : 'Ditutup') + '</span>' +
+          '<button class="btn ' + (buka ? 'primary' : '') + '" data-pilih="' + esc(s.id_sesi) + '">' + (buka ? 'Mulai' : 'Lihat') + '</button></div>';
       }).join('') : '<div class="card empty"><b>Belum ada sesi dibuka hari ini.</b><br>Sesi dibuka oleh petugas absensi. Tekan <b>Muat ulang</b> setelah sesi dibuka.</div>') +
-      '<div class="lp-pilih-foot">' +
+      '<div class="fx-pilih-foot">' +
         '<button class="btn" data-pilih-ulang><i data-lucide="refresh-cw"></i> Muat ulang</button>' +
-        '<button class="btn ghost" data-tanpa-sesi>Lanjut tanpa sesi (hanya laporan, tanpa absen)</button>' +
+        '<button class="btn ghost" data-tanpa-sesi>Lanjut tanpa sesi (hanya laporan)</button>' +
       '</div>';
     App.icons();
   }
@@ -148,9 +159,9 @@
     if (e.target.closest('[data-tanpa-sesi]')) { F.tanpaSesi = true; App.store.del(K_SESI); loadLapor(); }
   });
 
-  /* ---------- Langkah 2: jamaah binaan ---------- */
+  /* ---------- Langkah 2: jamaah kelas ---------- */
   function lpFiltered() {
-    var q = App.norm($('#lpSearch').value), k = $('#lpKeputusan').value, ind = $('#lpIndikator').value, ab = $('#lpAbsen').value;
+    var q = App.norm($('#lpSearch').value), k = $('#lpKeputusan').value, ind = $('#lpIndikator').value, ab = F.ab;
     return F.rows.filter(function (j) {
       var t = j.terakhir, hadir = j.absen && j.absen.status === 'Hadir';
       if (ab === 'belum' && j.absen) return false;
@@ -165,58 +176,102 @@
   }
   function absenBadge(a) {
     if (!a) return '<span class="lp-absen belum"><i data-lucide="circle-dashed"></i>Belum absen</span>';
-    var via = a.metode === 'Fasilitator' ? 'oleh fasilitator' : /Scan|Scanner/.test(a.metode) ? 'scan kartu' : a.metode ? a.metode.toLowerCase() : '';
+    var via = a.metode === 'Fasilitator' ? 'fasilitator' : /Scan|Scanner/.test(a.metode) ? 'scan kartu' : a.metode ? a.metode.toLowerCase() : '';
     return '<span class="lp-absen ' + (a.status === 'Hadir' ? 'hadir' : 'lain') + '"><i data-lucide="' + (a.status === 'Hadir' ? 'check-circle-2' : 'info') + '"></i>' +
       esc(a.status) + ' ' + esc(App.jam(a.waktu)) + (via ? ' · ' + esc(via) : '') + '</span>';
+  }
+  function stat(v, total, label, cls) {
+    return '<div class="fx-stat ' + (cls || '') + '"><b>' + v + (total !== null ? '<small>/' + total + '</small>' : '') + '</b><span>' + label + '</span></div>';
   }
 
   function renderLapor() {
     $('#lpPilih').hidden = true; $('#lpMain').hidden = false;
-    var list = lpFiltered();
+    var list = lpFiltered(), n = F.rows.length;
     var sudahHariIni = F.rows.filter(function (j) { return j.terakhir && j.terakhir.tanggal === F.today; }).length;
     var hadirN = F.rows.filter(function (j) { return j.absen && j.absen.status === 'Hadir'; }).length;
     var belum = F.rows.filter(function (j) { return !j.terakhir; }).length;
-    if (Admin.current === 'lapor') Admin.setSubtitle(F.rows.length + ' jamaah binaan · ' + (F.sesi ? hadirN + ' hadir · ' : '') + sudahHariIni + ' dilaporkan hari ini');
-    Admin.setCount('lapor', F.sesi ? F.rows.length - hadirN : F.rows.length - sudahHariIni, false);
+    if (Admin.current === 'lapor') Admin.setSubtitle(n + ' jamaah · ' + (F.sesi ? hadirN + ' hadir · ' : '') + sudahHariIni + ' dilaporkan hari ini');
+    Admin.setCount('lapor', F.sesi ? n - hadirN : n - sudahHariIni, false);
+    $('#lpHello').innerHTML =
+      '<div class="fx-hero-top"><div class="fx-ava">' + esc(namaDepan().charAt(0).toUpperCase()) + '</div><div>' +
+        '<div class="fx-hi">Assalamu\'alaikum, ' + esc(namaDepan()) + '</div>' +
+        '<div class="fx-date">' + esc(App.tgl(F.today, true)) + '</div></div></div>' + kelasInfo() +
+      '<div class="fx-stats">' + stat(n, null, 'Jamaah kelas') +
+        (F.sesi ? stat(hadirN, n, 'Hadir di sesi', 'ok') : '') +
+        stat(sudahHariIni, n, 'Dilaporkan hari ini', 'gold') + stat(belum, null, 'Belum pernah dilaporkan', belum ? 'warn' : '') + '</div>';
     var s = F.sesi;
     $('#lpSesi').innerHTML = s
-      ? '<div class="lp-sesi-info"><span class="lp-sesi-dot ' + (s.status === 'Dibuka' ? 'on' : '') + '"></span><div>' +
-          '<b>' + esc(s.nama_program) + '</b><div class="dim">' + esc(App.tgl(s.tanggal, true)) + (s.jam_mulai ? ' · ' + esc(s.jam_mulai) : '') + ' · ' +
-          (s.status === 'Dibuka' ? 'sesi dibuka' : 'sesi sudah ditutup — absen tidak bisa ditambah') + '</div></div></div>' +
-        '<button class="btn" data-ganti-sesi><i data-lucide="repeat"></i> Ganti sesi</button>'
-      : '<div class="lp-sesi-info"><span class="lp-sesi-dot"></span><div><b>Tanpa sesi</b><div class="dim">hanya laporan perkembangan, kehadiran tidak dicatat</div></div></div>' +
+      ? '<span class="fx-dot ' + (s.status === 'Dibuka' ? 'on' : '') + '"></span><div class="grow"><b>' + esc(s.nama_program) + '</b>' +
+          '<div class="dim">' + esc(App.tgl(s.tanggal, true)) + (s.jam_mulai ? ' · ' + esc(s.jam_mulai) : '') + ' · ' +
+          (s.status === 'Dibuka' ? 'sesi dibuka' : 'sesi ditutup — absen tidak bisa ditambah') + '</div></div>' +
+        '<button class="btn" data-ganti-sesi><i data-lucide="repeat"></i><span class="lbl-sm">Ganti sesi</span></button>'
+      : '<span class="fx-dot"></span><div class="grow"><b>Tanpa sesi</b><div class="dim">hanya laporan perkembangan, kehadiran tidak dicatat</div></div>' +
         '<button class="btn primary" data-ganti-sesi><i data-lucide="calendar-check"></i> Pilih sesi</button>';
-    $('#lpHello').innerHTML =
-      '<div><div class="lp-hello-t">Assalamu\'alaikum, ' + esc(((App.session || {}).nama || '').split(' ')[0] || 'Fasilitator') + '</div>' +
-      (F.fasil && F.fasil.kelas ? '<div class="lp-hello-kelas">' + indChip(F.fasil.kelas) + '<span class="dim">' + esc(F.fasil.kategori || '') + '</span></div>' : '') +
-      '<div class="dim">' + (bisaCatat() ? 'Tandai <b>Hadir</b> jamaah yang datang, lalu <b>Laporkan</b> perkembangannya' : 'Pilih jamaah lalu tekan <b>Laporkan</b>') + '</div></div>' +
-      '<div class="lp-hello-stats">' +
-        (s ? '<div class="lp-hello-n"><b>' + hadirN + '</b>/' + F.rows.length + '<span>hadir</span></div>' : '') +
-        '<div class="lp-hello-n"><b>' + sudahHariIni + '</b>/' + F.rows.length + '<span>dilaporkan</span></div></div>' +
-      (belum ? '<div class="lp-hello-note">' + belum + ' jamaah belum pernah dilaporkan</div>' : '');
-    $('#lpAbsen').hidden = !s;
-    $('#lpCards').innerHTML = !F.rows.length
-      ? '<div class="glass card empty">Belum ada jamaah binaan. Admin yang menentukan jamaah untuk setiap fasilitator.</div>'
+    $('#lpAbsenSeg').hidden = !s;
+    App.$$('#lpAbsenSeg [data-ab]').forEach(function (b) { b.classList.toggle('on', b.dataset.ab === F.ab); });
+    $('#lpCount').textContent = list.length === n ? n + ' jamaah' : 'Menampilkan ' + list.length + ' dari ' + n + ' jamaah';
+    $('#lpCards').innerHTML = !n
+      ? '<div class="card empty">Belum ada jamaah di kelas Anda. Admin yang menentukan kelas &amp; jamaahnya.</div>'
       : list.length ? list.map(function (j) {
-        var t = j.terakhir, hariIni = t && t.tanggal === F.today;
-        return '<div class="lp-card' + (j.absen && j.absen.status === 'Hadir' ? ' hadir' : '') + '" data-id="' + esc(j.id_jamaah) + '">' +
-          '<div class="lp-card-top">' + App.avatar(j.thumb, j.nama, 52) +
-            '<div class="jc-main"><div class="jc-name">' + esc(j.nama) + '</div>' +
-            '<div class="jc-sub"><span class="mono">' + esc(j.id_jamaah) + '</span>' + (j.desa ? ' · ' + esc(j.desa) : '') + '</div></div>' +
-            (hariIni ? '<span class="lp-done" title="Sudah dilaporkan hari ini"><i data-lucide="clipboard-check"></i></span>' : '') +
+        var t = j.terakhir, hariIni = t && t.tanggal === F.today, hadir = j.absen && j.absen.status === 'Hadir';
+        return '<div class="fx-row' + (hadir ? ' hadir' : '') + '" data-id="' + esc(j.id_jamaah) + '">' +
+          '<button type="button" class="fx-who" data-act="detail" title="Lihat detail jamaah">' + App.avatar(j.thumb, j.nama, 48) +
+            '<span class="fx-who-t"><b>' + esc(j.nama) + '</b><span class="dim"><span class="mono">' + esc(j.id_jamaah) + '</span>' + (j.desa ? ' · ' + esc(j.desa) : '') + '</span></span>' +
+            '<i data-lucide="chevron-right" class="fx-chev"></i></button>' +
+          '<div class="fx-meta">' + (s ? absenBadge(j.absen) : '') +
+            (t ? indChip(t.indikator) + kepBadge(t.keputusan) + '<span class="fx-when">' + (hariIni ? 'dilaporkan hari ini' : esc(tglPendek(t.tanggal))) + '</span>'
+               : (F.fasil && F.fasil.kelas ? indChip(j.kelas || F.fasil.kelas) + '<span class="fx-when">kelas awal · belum dilaporkan</span>' : '<span class="fx-when">belum pernah dilaporkan</span>')) +
           '</div>' +
-          (s ? '<div class="lp-card-absen">' + absenBadge(j.absen) + '</div>' : '') +
-          '<div class="lp-card-last">' + (t
-            ? indChip(t.indikator) + kepBadge(t.keputusan) + '<span class="dim">' + esc(tglPendek(t.tanggal)) + '</span>'
-            : (F.fasil && F.fasil.kelas ? indChip(F.fasil.kelas) + '<span class="dim">kelas awal · belum dilaporkan</span>' : '<span class="dim">Belum pernah dilaporkan</span>')) + '</div>' +
-          (t && t.keterangan ? '<div class="lp-card-ket">“' + esc(t.keterangan) + '”</div>' : '') +
-          '<div class="lp-card-btns">' +
-            (bisaCatat() && !j.absen ? '<button type="button" class="btn primary" data-act="hadir"><i data-lucide="user-check"></i> Tandai Hadir</button>' : '') +
-            '<button type="button" class="btn ' + (hariIni ? '' : 'primary') + '" data-act="lapor"><i data-lucide="clipboard-pen"></i> ' + (hariIni ? 'Laporkan lagi' : 'Laporkan') + '</button>' +
+          '<div class="fx-btns">' +
+            (bisaCatat() && !j.absen ? '<button type="button" class="btn primary" data-act="hadir"><i data-lucide="user-check"></i> Hadir</button>' : '') +
+            '<button type="button" class="btn ' + (hariIni ? '' : 'primary-soft') + '" data-act="lapor"><i data-lucide="clipboard-pen"></i> ' + (hariIni ? 'Lapor lagi' : 'Laporkan') + '</button>' +
           '</div>' +
         '</div>';
-      }).join('') : '<div class="glass card empty">Tidak ada jamaah yang cocok dengan filter.</div>';
+      }).join('') : '<div class="card empty">Tidak ada jamaah yang cocok dengan filter.</div>';
     App.icons();
+  }
+
+  /* ---------- Detail jamaah (hanya-baca, data dari admin / tim pendataan) ---------- */
+  function openDetail(j) {
+    var th = j.thumb;
+    var ini = esc((j.nama || '?').split(' ').map(function (w) { return w.charAt(0); }).slice(0, 2).join('').toUpperCase());
+    App.modal({
+      title: 'Detail Jamaah', okText: 'Tutup', cancelText: false,
+      html: '<div class="det-wrap"><div data-dfoto>' + (th ? '<img class="foto-big" src="' + esc(th) + '" alt="">' : '<span class="ava ava-ini foto-big">' + ini + '</span>') + '</div>' +
+        '<div data-dbody><div class="dim mono">' + esc(j.id_jamaah) + '</div><h2 style="margin:4px 0 10px">' + esc(j.nama) + '</h2><p class="dim">Memuat data…</p></div></div>' +
+        '<div class="fx-detail-act">' +
+          (bisaCatat() && !j.absen ? '<button class="btn primary" data-d="hadir"><i data-lucide="user-check"></i> Tandai Hadir</button>' : (F.sesi ? absenBadge(j.absen) : '')) +
+          '<button class="btn" data-d="lapor"><i data-lucide="clipboard-pen"></i> Laporkan</button></div>' +
+        '<div class="sec-title" style="margin-top:16px">Riwayat laporan</div><div data-driwayat><p class="dim">Memuat…</p></div>',
+      onOpen: function (wrap) {
+        wrap.querySelector('.modal-box').classList.add('modal-lg');
+        wrap.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-d]'); if (!b) return;
+          wrap.querySelector('[data-act=yes]').click();
+          if (b.dataset.d === 'hadir') tandaiHadir(j); else openLapor(j);
+        });
+        App.api('detailJamaahFasilitator', j.id_jamaah).then(function (d) {
+          function row(label, val, full) { return '<div class="pf-item' + (full ? ' full' : '') + '"><span>' + label + '</span><b>' + (val ? val : '<i class="dim">–</i>') + '</b></div>'; }
+          var wa = d.no_hp ? d.no_hp.replace(/^0/, '62').replace(/[^0-9]/g, '') : '';
+          var hp = d.no_hp ? esc(d.no_hp) + ' <a class="pf-link" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">WhatsApp</a> <a class="pf-link" href="tel:' + esc(d.no_hp) + '">Telepon</a>' : '';
+          var rtrw = (d.rt ? 'RT ' + d.rt : '') + (d.rw ? (d.rt ? ' / ' : '') + 'RW ' + d.rw : '');
+          wrap.querySelector('[data-dbody]').innerHTML =
+            '<div class="dim mono">' + esc(d.id_jamaah) + '</div><h2 style="margin:4px 0 12px">' + esc(d.nama) + '</h2>' +
+            '<div class="pf-grid">' +
+              row('Nama panggilan', esc(d.nama_panggilan)) + row('Jenis kelamin', d.jenis_kelamin === 'L' ? 'Ikhwan' : d.jenis_kelamin === 'P' ? 'Akhwat' : '') +
+              row('Tanggal lahir · usia', d.tanggal_lahir ? esc(App.tgl(d.tanggal_lahir)) + (d.usia !== '' && d.usia !== undefined ? ' · ' + d.usia + ' th' : '') : '') +
+              row('Pekerjaan', esc(d.pekerjaan)) + row('No HP', hp, true) + row('Alamat asli', esc(d.alamat), true) +
+              row('Desa · wilayah', [d.desa, rtrw, d.kecamatan, d.kota, d.provinsi].filter(String).map(esc).join(', '), true) +
+              row('Kartu keluarga', esc(d.no_kk)) + row('Kelas', esc(j.kelas || '')) +
+              row('Terdaftar sejak', d.tanggal_daftar ? esc(App.tgl(d.tanggal_daftar)) : '') + row('Total hadir', d.jumlah_hadir + ' kali') +
+              (d.catatan ? row('Catatan', esc(d.catatan), true) : '') +
+            '</div>';
+        }).catch(function (e) { wrap.querySelector('[data-dbody]').innerHTML = '<p class="error-text">' + esc(e.message) + '</p>'; });
+        if (th) App.api('getFotoJamaah', j.id_jamaah).then(function (full) { var im = wrap.querySelector('[data-dfoto] img'); if (im && full) im.src = full; }).catch(function () {});
+        App.api('riwayatLaporanJamaah', j.id_jamaah).then(function (list) { wrap.querySelector('[data-driwayat]').innerHTML = riwayatHtml(list); App.icons(); })
+          .catch(function () { wrap.querySelector('[data-driwayat]').innerHTML = '<p class="dim">Riwayat tidak bisa dimuat.</p>'; });
+      }
+    });
   }
 
   function tandaiHadir(j) {
@@ -278,17 +333,23 @@
 
   var tl;
   $('#lpSearch').addEventListener('input', function () { clearTimeout(tl); tl = setTimeout(renderLapor, 120); });
-  ['#lpKeputusan', '#lpIndikator', '#lpAbsen'].forEach(function (id) { $(id).addEventListener('change', renderLapor); });
+  ['#lpKeputusan', '#lpIndikator'].forEach(function (id) { $(id).addEventListener('change', renderLapor); });
+  $('#lpAbsenSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-ab]'); if (!b) return;
+    F.ab = b.dataset.ab; renderLapor();
+  });
   $('#lpSesi').addEventListener('click', function (e) {
     if (!e.target.closest('[data-ganti-sesi]')) return;
     F.tanpaSesi = false; App.store.del(K_SESI); F.sesi = null; loadLapor();
   });
   $('#lpCards').addEventListener('click', function (e) {
-    var c = e.target.closest('.lp-card[data-id]'); if (!c) return;
+    var c = e.target.closest('.fx-row[data-id]'); if (!c) return;
     var j = F.rows.filter(function (x) { return x.id_jamaah === c.dataset.id; })[0];
     if (!j) return;
-    if (e.target.closest('[data-act=hadir]')) tandaiHadir(j);
-    else if (e.target.closest('[data-act=lapor]')) openLapor(j);
+    var b = e.target.closest('[data-act]'); if (!b) return;
+    if (b.dataset.act === 'hadir') tandaiHadir(j);
+    else if (b.dataset.act === 'lapor') openLapor(j);
+    else openDetail(j);
   });
   // Segarkan status hadir (scan petugas) tiap 30 detik selama halaman terbuka.
   setInterval(function () {
@@ -296,8 +357,8 @@
   }, 30000);
 
   Admin.register('lapor', {
-    title: 'Laporan Jamaah', nav: 'Laporan Jamaah', icon: 'clipboard-pen', only: ['fasilitator'],
-    subtitle: 'Absen & perkembangan bacaan jamaah binaan', show: function () { return loadLapor(); }
+    title: 'Jamaah Kelas Saya', nav: 'Jamaah Kelas Saya', icon: 'clipboard-pen', only: ['fasilitator'],
+    subtitle: 'Absen, detail, & perkembangan bacaan jamaah', show: function () { return loadLapor(); }
   });
 
   /* =====================================================================

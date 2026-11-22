@@ -162,6 +162,10 @@ Jenis petugas ketiga selain admin dan petugas absensi. Admin membuatnya di menu 
 - Tombol kembali di HP dijaga `App.guardBack()`: pop-up ditutup dulu, lalu konfirmasi *Keluar dari aplikasi?*.
 
 ## Fasilitator & laporan perkembangan jamaah
+- **Fasilitator per orang**: akun di sheet PETUGAS dengan `jenis = fasilitator` (dibuat di Kelola User). **Kelas** (sheet FASILITATOR) menyimpan pasangan di `anggota_1` / `anggota_2`; nama kelas = gabungan nama anggota (otomatis ikut bila nama diganti). Jenis kelamin kelas tidak dipakai lagi.
+- Migrasi otomatis (`migrasiAkunFasilitator_`): akun lama per pasangan → Fasilitator 1 memakai username & password lama, Fasilitator 2 dibuatkan akun baru (password acak, admin tinggal reset).
+- `detailJamaahFasilitator`: fasilitator melihat data lengkap jamaah kelasnya (hanya-baca).
+- Semua filter `<select class="input">` di luar pop-up memakai dropdown kustom (`App.dropdown` / `App.enhanceSelects`), select asli tetap menjadi sumber nilai.
 - Fasilitator memilih **sesi hari ini** dulu. `fasilitatorTandaiHadir` dan `simpanLaporanFasilitator` (dengan `id_sesi`) mencatat HADIR (metode `Fasilitator`, id_petugas = id fasilitator) bila jamaah belum tercatat — dobel dengan scan petugas tanpa data ganda. Kolom `id_sesi` ditambahkan ke sheet LAPORAN FASILITATOR.
 - Satu fasilitator = satu **kelas**: `kelas` (Iqro' 1 … Qur'an Besar) dan `kategori` (Ibu & Bapak / Remaja & Anak). Jamaah yang belum pernah dilaporkan dianggap berada di tingkat kelasnya.
 - Admin menentukan jamaah binaan setiap fasilitator (menu **Fasilitator** → 👥; disimpan di kolom *Fasilitator* sheet DATA MASTER JAMAAH).

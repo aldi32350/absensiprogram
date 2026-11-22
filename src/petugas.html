@@ -1,5 +1,6 @@
 <!-- petugas.html — KELOLA USER: semua akun login selain admin (petugas absensi, pendataan, fasilitator).
-     Admin menentukan peran setiap akun; semua login memakai username + password. -->
+     Admin menentukan peran setiap akun; semua login memakai username + password.
+     Fasilitator dibuat per ORANG di sini; pasangan & kelasnya diatur di menu Fasilitator. -->
 <section id="view-petugas" hidden>
   <div class="toolbar">
     <div class="input-wrap search">
@@ -19,61 +20,60 @@
       <tbody id="ptBody"><tr><td colspan="6" class="empty">Memuat…</td></tr></tbody>
     </table>
   </div>
-  <p class="dim" style="margin:10px 2px 0;font-size:12.5px">Semua akun masuk lewat halaman login yang sama dengan <b>username + password</b>. Peran akun menentukan halaman yang terbuka: petugas absensi → aplikasi scan, pendataan &amp; fasilitator → panel.</p>
+  <p class="dim" style="margin:10px 2px 0;font-size:12.5px">Semua akun masuk lewat halaman login yang sama dengan <b>username + password</b>. Peran menentukan halaman yang terbuka. Pasangan &amp; kelas fasilitator diatur di menu <b>Fasilitator</b>.</p>
 </section>
 
 <script>
 (function () {
   var $ = App.$, esc = App.esc;
-  var state = { rows: [], programs: [], fasil: [] };
+  var state = { rows: [], programs: [] };
   var PERAN = {
-    absensi: { label: 'Petugas absensi', chip: '', ic: 'scan-barcode' },
-    pendataan: { label: 'Pendataan', chip: 'gold', ic: 'clipboard-pen' },
-    fasilitator: { label: 'Fasilitator', chip: 'ok', ic: 'book-open-check' }
+    absensi: { label: 'Petugas absensi', cls: 'pr-abs', ic: 'scan-barcode', ket: 'Scan kartu jamaah di HP' },
+    pendataan: { label: 'Pendataan', cls: 'pr-data', ic: 'clipboard-pen', ket: 'Melengkapi & menambah data master' },
+    fasilitator: { label: 'Fasilitator', cls: 'pr-fasil', ic: 'book-open-check', ket: 'Absen & laporan jamaah kelasnya' }
   };
 
   function progName(id) {
     var p = state.programs.filter(function (x) { return x.id_program === id; })[0];
     return p ? p.nama_program : id;
   }
-  function fasilLabel(f) { return (f.kelas ? f.kelas + ' · ' : '') + f.nama; }
 
   function load() {
     return App.api('listPetugas').then(function (d) {
-      state.programs = d.programs; state.fasil = d.fasilitator || [];
-      state.rows = d.rows.map(function (p) {
-        return { tipe: 'petugas', id: p.id_petugas, nama: p.nama, username: p.username, peran: p.jenis === 'pendataan' ? 'pendataan' : 'absensi',
-                 status: p.status, program_ids: p.program_ids, raw: p };
-      }).concat(state.fasil.filter(function (f) { return f.punya_akun; }).map(function (f) {
-        return { tipe: 'fasilitator', id: f.id_fasilitator, nama: f.nama, username: f.username, peran: 'fasilitator', status: f.status, raw: f };
-      })).sort(function (a, b) { return a.peran.localeCompare(b.peran) || a.nama.localeCompare(b.nama, 'id'); });
+      state.programs = d.programs;
+      state.rows = d.rows.slice().sort(function (a, b) { return a.jenis.localeCompare(b.jenis) || a.nama.localeCompare(b.nama, 'id'); });
       render();
     }).catch(function (e) { App.toast(e.message, 'err'); });
   }
 
+  function tugasHtml(p) {
+    if (p.jenis === 'pendataan') return '<span class="dim">Data master jamaah</span>';
+    if (p.jenis === 'fasilitator') return (p.kelas || []).length
+      ? p.kelas.map(function (k) { return '<span class="chip">' + esc((k.kelas || 'Kelas') + (k.kategori ? ' · ' + k.kategori : '')) + '</span>'; }).join('')
+      : '<span class="warn-chip">Belum punya kelas</span>';
+    return p.program_ids.length ? p.program_ids.map(function (id) { return '<span class="chip">' + esc(progName(id)) + '</span>'; }).join('') : '<span class="dim">Belum ditugaskan</span>';
+  }
+
   function render() {
     var q = App.norm($('#kuSearch').value), pr = $('#kuPeran').value;
-    var list = state.rows.filter(function (r) { return (!pr || r.peran === pr) && (!q || App.norm(r.nama + ' ' + r.username).indexOf(q) !== -1); });
+    var list = state.rows.filter(function (r) { return (!pr || r.jenis === pr) && (!q || App.norm(r.nama + ' ' + r.username).indexOf(q) !== -1); });
     var n = { absensi: 0, pendataan: 0, fasilitator: 0 };
-    state.rows.forEach(function (r) { n[r.peran]++; });
+    state.rows.forEach(function (r) { n[r.jenis]++; });
     if (Admin.current === 'petugas') Admin.setSubtitle(state.rows.length + ' akun · ' + n.absensi + ' petugas absensi · ' + n.pendataan + ' pendataan · ' + n.fasilitator + ' fasilitator');
     Admin.setCount('petugas', state.rows.length);
     $('#ptBody').innerHTML = list.length ? list.map(function (r) {
-      var on = r.status === 'Aktif', pe = PERAN[r.peran];
-      var tugas = r.peran === 'pendataan' ? '<span class="dim">Data master jamaah</span>'
-        : r.peran === 'fasilitator' ? (r.raw.kelas ? '<span class="chip">' + esc(r.raw.kelas) + (r.raw.kategori ? ' · ' + esc(r.raw.kategori) : '') + '</span>' : '<span class="dim">Laporan jamaah binaan</span>')
-        : (r.program_ids.length ? r.program_ids.map(function (id) { return '<span class="chip">' + esc(progName(id)) + '</span>'; }).join('') : '<span class="dim">Belum ditugaskan</span>');
-      return '<tr data-tipe="' + r.tipe + '" data-id="' + esc(r.id) + '">' +
-        '<td><b>' + esc(r.nama) + '</b><div class="dim mono">' + esc(r.id) + '</div></td>' +
+      var on = r.status === 'Aktif', pe = PERAN[r.jenis];
+      return '<tr data-id="' + esc(r.id_petugas) + '">' +
+        '<td><b>' + esc(r.nama) + '</b><div class="dim mono">' + esc(r.id_petugas) + '</div></td>' +
         '<td class="mono">' + esc(r.username) + '</td>' +
-        '<td><span class="chip ' + pe.chip + '"><i data-lucide="' + pe.ic + '" style="width:13px;height:13px;vertical-align:-2px"></i> ' + pe.label + '</span></td>' +
-        '<td class="hide-sm-col">' + tugas + '</td>' +
+        '<td><span class="role-chip ' + pe.cls + '"><i data-lucide="' + pe.ic + '"></i>' + pe.label + '</span></td>' +
+        '<td class="hide-sm-col">' + tugasHtml(r) + '</td>' +
         '<td>' + App.statusBadge(r.status) + '</td>' +
         '<td><div class="actions">' +
           '<button class="btn" data-act="edit" title="Edit"><i data-lucide="pencil"></i></button>' +
           '<button class="btn" data-act="pw" title="Reset password"><i data-lucide="key-round"></i></button>' +
           '<button class="btn" data-act="toggle" title="' + (on ? 'Nonaktifkan' : 'Aktifkan') + '"><i data-lucide="' + (on ? 'user-x' : 'user-check') + '"></i></button>' +
-          '<button class="btn" data-act="del" title="' + (r.tipe === 'fasilitator' ? 'Hapus akun login' : 'Hapus') + '"><i data-lucide="trash-2"></i></button>' +
+          '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
         '</div></td></tr>';
     }).join('') : '<tr><td colspan="6" class="empty">' + (state.rows.length ? 'Tidak ada akun yang cocok.' : 'Belum ada user. Klik "Tambah User".') + '</td></tr>';
     App.icons();
@@ -82,37 +82,22 @@
   /* ---------- Tambah / edit ---------- */
   function form(r) {
     var isEdit = !!r;
-    var peranAwal = r ? r.peran : 'absensi';
-    var tanpaAkun = state.fasil.filter(function (f) { return !f.punya_akun && f.status === 'Aktif'; });
-    var v = r && r.tipe === 'petugas' ? { nama: r.nama, username: r.username, status: r.status, program_ids: r.program_ids, peran: r.peran }
-          : r ? { username: r.username, peran: 'fasilitator' } : { status: 'Aktif', program_ids: [], peran: 'absensi' };
     App.formModal({
       title: isEdit ? 'Edit User · ' + r.username : 'Tambah User',
-      values: v,
+      values: r ? { nama: r.nama, username: r.username, status: r.status, program_ids: r.program_ids, peran: r.jenis } : { status: 'Aktif', program_ids: [], peran: 'absensi' },
       html:
-        '<div class="field"><span>Peran (role) *</span><div class="check-grid ku-peran">' +
+        '<div class="field"><span>Peran (role) *</span><div class="role-pick">' +
           ['absensi', 'pendataan', 'fasilitator'].map(function (k) {
-            var dis = isEdit && ((r.tipe === 'fasilitator') !== (k === 'fasilitator'));
-            var ket = { absensi: 'Scan kartu jamaah di HP', pendataan: 'Melengkapi & menambah data master', fasilitator: 'Absen & laporan jamaah binaan' }[k];
-            return '<label class="check' + (dis ? ' dis' : '') + '"><input type="radio" name="peran" value="' + k + '"' + (dis ? ' disabled' : '') + '> <span><b>' + PERAN[k].label + '</b><br><small class="dim">' + ket + '</small></span></label>';
-          }).join('') + '</div>' +
-          (isEdit ? '<small class="dim">Mengganti peran antara fasilitator dan petugas: hapus akun lalu buat baru.</small>' : '') + '</div>' +
-        // Petugas absensi / pendataan
-        '<div data-p="petugas"><div class="form-grid">' +
-          '<label class="field"><span>Nama *</span><input class="input" name="nama"></label>' +
-          '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
-        '</div></div>' +
-        // Fasilitator: pilih kelas
-        '<div data-p="fasilitator">' + (isEdit ? '<p class="muted" style="margin:0 0 6px">Fasilitator: <b>' + esc(fasilLabel(r.raw)) + '</b></p>' :
-          '<label class="field"><span>Kelas / fasilitator *</span><select class="input" name="id_fasilitator">' +
-            (tanpaAkun.length ? '<option value="">— pilih —</option>' + tanpaAkun.map(function (f) { return '<option value="' + esc(f.id_fasilitator) + '">' + esc(fasilLabel(f)) + '</option>'; }).join('')
-                              : '<option value="">Semua fasilitator sudah punya akun</option>') +
-          '</select></label><small class="dim">Fasilitator / kelas baru ditambahkan di menu Fasilitator.</small>') + '</div>' +
+            return '<label><input type="radio" name="peran" value="' + k + '"><span><i data-lucide="' + PERAN[k].ic + '"></i><b>' + PERAN[k].label + '</b><small>' + PERAN[k].ket + '</small></span></label>';
+          }).join('') + '</div></div>' +
         '<div class="form-grid">' +
+          '<label class="field full"><span>Nama lengkap *</span><input class="input" name="nama" required maxlength="80" placeholder="nama lengkap sesuai identitas"></label>' +
           '<label class="field"><span>Username *</span><input class="input" name="username" required autocapitalize="none" spellcheck="false" placeholder="huruf kecil, mis. ahmad.f"></label>' +
           '<label class="field"><span>' + (isEdit ? 'Password baru (kosongkan bila tetap)' : 'Password (min. 4 karakter) *') + '</span>' +
             '<input class="input" name="password" type="text" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>' +
+          '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
         '</div>' +
+        '<p class="dim" data-fasil-info style="margin:0">Setelah disimpan, pasangkan fasilitator ini ke kelasnya di menu <b>Fasilitator</b>.</p>' +
         '<div class="field" data-prog-field><span>Program yang ditangani</span>' +
         (state.programs.length ? '<div class="check-grid">' + state.programs.map(function (p) {
           return '<label class="check"><input type="checkbox" data-multi name="program_ids" value="' + esc(p.id_program) + '">' +
@@ -121,37 +106,29 @@
       onOpen: function (f) {
         function sync() {
           var k = (f.querySelector('[name=peran]:checked') || {}).value;
-          f.querySelector('[data-p=petugas]').hidden = k === 'fasilitator';
-          f.querySelector('[data-p=fasilitator]').hidden = k !== 'fasilitator';
           f.querySelector('[data-prog-field]').hidden = k !== 'absensi';
+          f.querySelector('[data-fasil-info]').hidden = k !== 'fasilitator';
         }
         App.$$('[name=peran]', f).forEach(function (x) { x.addEventListener('change', sync); });
         sync();
       },
       onSubmit: function (val) {
-        var peran = val.peran;
         val.username = (val.username || '').toLowerCase();
+        if (!val.nama) throw new Error('Nama lengkap wajib diisi.');
         if (!/^[a-z0-9._]{3,20}$/.test(val.username)) throw new Error('Username 3–20 karakter: huruf kecil, angka, titik, atau garis bawah.');
         if (val.password && val.password.length < 4) throw new Error('Password minimal 4 karakter.');
         if (!isEdit && !val.password) throw new Error('Isi password.');
-        if (peran === 'fasilitator') {
-          var idF = isEdit ? r.id : val.id_fasilitator;
-          if (!idF) throw new Error('Pilih kelas / fasilitator.');
-          return App.api('aturAkunFasilitator', idF, val.username, val.password);
-        }
-        if (!val.nama) throw new Error('Nama wajib diisi.');
-        var data = { nama: val.nama, username: val.username, status: val.status, program_ids: peran === 'absensi' ? val.program_ids : [],
-                     jenis: peran, password: val.password };
-        if (isEdit) data.id_petugas = r.id;
+        var data = { nama: val.nama, username: val.username, status: val.status, program_ids: val.peran === 'absensi' ? val.program_ids : [],
+                     jenis: val.peran, password: val.password };
+        if (isEdit) data.id_petugas = r.id_petugas;
         return App.api('savePetugas', data).then(function (saved) {
-          // Edit + password baru → reset password juga
-          if (isEdit && val.password) return App.api('resetPinPetugas', r.id, val.password).then(function () { return saved; });
+          if (isEdit && val.password) return App.api('resetPinPetugas', r.id_petugas, val.password).then(function () { return saved; });
           return saved;
         });
       }
     }).then(function (saved) {
       if (!saved) return;
-      App.toast('User disimpan: ' + (saved.nama || saved.username), 'ok');
+      App.toast('User disimpan: ' + saved.nama, 'ok');
       load();
     });
   }
@@ -164,7 +141,7 @@
         '<label class="field"><span>Password baru (opsional)</span><input class="input" name="pw" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"></label>',
       onSubmit: function (v) {
         if (v.pw && v.pw.length < 4) throw new Error('Password minimal 4 karakter.');
-        return App.api(r.tipe === 'fasilitator' ? 'resetPinFasilitator' : 'resetPinPetugas', r.id, v.pw);
+        return App.api('resetPinPetugas', r.id_petugas, v.pw);
       }
     }).then(function (res) {
       if (!res) return;
@@ -178,24 +155,20 @@
 
   function toggle(r) {
     var to = r.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
-    var ket = to === 'Nonaktif' ? r.nama + ' langsung keluar dan tidak bisa login.' + (r.tipe === 'fasilitator' ? ' Kelasnya juga ditandai nonaktif.' : '') : r.nama + ' bisa login kembali.';
-    App.confirm(to === 'Nonaktif' ? 'Nonaktifkan user?' : 'Aktifkan user?', ket, to, to === 'Nonaktif').then(function (ok) {
+    App.confirm(to === 'Nonaktif' ? 'Nonaktifkan user?' : 'Aktifkan user?',
+      to === 'Nonaktif' ? r.nama + ' langsung keluar dan tidak bisa login.' : r.nama + ' bisa login kembali.', to, to === 'Nonaktif').then(function (ok) {
       if (!ok) return;
       App.loading(true);
-      App.api(r.tipe === 'fasilitator' ? 'setFasilitatorStatus' : 'setPetugasStatus', r.id, to)
-        .then(function () { App.toast(r.nama + ' → ' + to, 'ok'); return load(); })
+      App.api('setPetugasStatus', r.id_petugas, to).then(function () { App.toast(r.nama + ' → ' + to, 'ok'); return load(); })
         .catch(function (e) { App.toast(e.message, 'err'); }).finally(function () { App.loading(false); });
     });
   }
 
   function del(r) {
-    var fas = r.tipe === 'fasilitator';
-    App.confirm(fas ? 'Hapus akun login?' : 'Hapus user?',
-      fas ? 'Akun login ' + r.username + ' dihapus. Kelas, jamaah binaan, dan riwayat laporan ' + r.nama + ' tetap ada.'
-          : r.nama + ' akan dihapus permanen. Hanya bisa jika belum pernah mencatat absensi (bila sudah, nonaktifkan saja).', 'Hapus', true).then(function (ok) {
+    App.confirm('Hapus user?', r.nama + ' akan dihapus permanen. Bila sudah pernah mencatat absensi atau masih memegang kelas, nonaktifkan / lepaskan dulu.', 'Hapus', true).then(function (ok) {
       if (!ok) return;
       App.loading(true);
-      App.api(fas ? 'hapusAkunFasilitator' : 'deletePetugas', r.id).then(function () { App.toast('Dihapus', 'ok'); return load(); })
+      App.api('deletePetugas', r.id_petugas).then(function () { App.toast('Dihapus', 'ok'); return load(); })
         .catch(function (e) { App.toast(e.message, 'err', 5000); }).finally(function () { App.loading(false); });
     });
   }
@@ -205,8 +178,8 @@
   $('#kuPeran').addEventListener('change', render);
   $('#ptBody').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
-    var tr = b.closest('tr');
-    var r = state.rows.filter(function (x) { return x.tipe === tr.dataset.tipe && x.id === tr.dataset.id; })[0];
+    var id = b.closest('tr').dataset.id;
+    var r = state.rows.filter(function (x) { return x.id_petugas === id; })[0];
     if (r) ({ edit: form, pw: resetPw, toggle: toggle, del: del })[b.dataset.act](r);
   });
 

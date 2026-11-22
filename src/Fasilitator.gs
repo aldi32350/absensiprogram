@@ -11,6 +11,7 @@ var KATEGORI_KELAS = ['Ibu & Bapak', 'Remaja & Anak'];
 function listFasilitator(token) {
   return respond_(function () {
     requireAuth_(token, 'admin');
+    withLock_(migrasiAkunFasilitator_);
     withLock_(syncFasilitatorDariJamaah_);
     var jamaah = readAll_('DATA_JAMAAH');
     var count = {}, aktif = {}, anggota = {};
@@ -29,7 +30,13 @@ function listFasilitator(token) {
       o.jamaah = (anggota[f.nama] || []).sort(function (a, b) { return a[1].localeCompare(b[1], 'id'); });   // [id, nama, panggilan]
       return o;
     }).sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); });
-    return { rows: rows, tanpa_fasilitator: jamaah.filter(function (j) { return !j.kelompok && j.status === 'Aktif'; }).length };
+    // Akun fasilitator (per orang) dari Kelola User → dipilih sebagai pasangan kelas.
+    var dipakai = {};
+    rows.forEach(function (k) { if (k.anggota_1) dipakai[k.anggota_1] = k.nama; if (k.anggota_2) dipakai[k.anggota_2] = k.nama; });
+    var users = readAll_('PETUGAS').filter(function (p) { return p.jenis === 'fasilitator'; }).map(function (p) {
+      return { id_petugas: p.id_petugas, nama: p.nama, username: p.username, status: p.status, kelas: dipakai[p.id_petugas] || '' };
+    }).sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); });
+    return { rows: rows, users: users, tanpa_fasilitator: jamaah.filter(function (j) { return !j.kelompok && j.status === 'Aktif'; }).length };
   });
 }
 
@@ -53,10 +60,19 @@ function saveFasilitator(token, data) {
   return respond_(function () {
     var s = requireAuth_(token, 'admin');
     data = data || {};
+    var anggota = [clean_(data.anggota_1), clean_(data.anggota_2)].filter(String);
+    if (anggota.length === 2 && anggota[0] === anggota[1]) throw new Error('Fasilitator 1 dan 2 tidak boleh orang yang sama.');
+    var namaAnggota = anggota.map(function (id) {
+      var u = findBy_('PETUGAS', 'id_petugas', id);
+      if (!u || u.jenis !== 'fasilitator') throw new Error('Fasilitator tidak ditemukan di Kelola User.');
+      return u.nama.replace(/,/g, ' ').trim();
+    });
+    if (anggota.length) data.nama = namaAnggota.join(' & ');
     var rec = {
+      anggota_1: anggota[0] || '', anggota_2: anggota[1] || '',
       nama: clean_(data.nama).replace(/\s+/g, ' '),
       no_hp: normalizePhone_(data.no_hp),
-      jenis_kelamin: normalizeJk_(data.jenis_kelamin),
+      jenis_kelamin: '',
       status: clean_(data.status) || 'Aktif',
       catatan: clean_(data.catatan),
       username: clean_(data.username).toLowerCase(),
@@ -69,7 +85,7 @@ function saveFasilitator(token, data) {
     if (rec.kelas && INDIKATOR_JAMAAH.indexOf(rec.kelas) === -1) throw new Error('Kelas tidak valid.');
     if (rec.kategori && KATEGORI_KELAS.indexOf(rec.kategori) === -1) throw new Error('Kategori tidak valid.');
     var pin = clean_(data.pin);
-    if (!rec.nama) throw new Error('Nama fasilitator wajib diisi.');
+    if (!rec.nama) throw new Error('Pilih minimal Fasilitator 1.');
     if (rec.username && !/^[a-z0-9._]{3,20}$/.test(rec.username)) throw new Error('Username 3–20 karakter: huruf kecil, angka, titik, atau garis bawah.');
     if (pin) cekPasswordUser_(pin);
     if (rec.nama.indexOf(',') !== -1) throw new Error('Nama fasilitator tidak boleh mengandung koma (pakai "&" untuk dua orang).');
@@ -78,7 +94,7 @@ function saveFasilitator(token, data) {
     return withLock_(function () {
       var all = readAll_('FASILITATOR');
       var dup = all.some(function (f) { return f.nama.toLowerCase() === rec.nama.toLowerCase() && f.id_fasilitator !== data.id_fasilitator; });
-      if (dup) throw new Error('Nama fasilitator sudah ada.');
+      if (dup) throw new Error('Pasangan fasilitator ini sudah ada di kelas lain.');
       if (rec.username) cekUsernameUnik_(rec.username, 'FASILITATOR', data.id_fasilitator || '');
       if (pin) { rec.salt = newSalt_(); rec.pin_hash = hash_(pin, rec.salt); }
       if (data.id_fasilitator) {
@@ -157,6 +173,69 @@ function resetPinFasilitator(token, id, pin) {
       return { pin: pin, username: f.username };
     });
   });
+}
+
+/* ---------- Fasilitator per orang ---------- */
+
+/** Kelas (baris FASILITATOR) yang dipegang seorang fasilitator (id_petugas). */
+function kelasMilik_(idPetugas) {
+  if (!idPetugas) return [];
+  return readAll_('FASILITATOR').filter(function (k) { return k.anggota_1 === idPetugas || k.anggota_2 === idPetugas; });
+}
+
+/** Nama kelas = nama anggota; dipanggil saat nama akun fasilitator diganti di Kelola User (di dalam lock). */
+function perbaruiNamaKelas_(idPetugas) {
+  kelasMilik_(idPetugas).forEach(function (k) {
+    var nama = [k.anggota_1, k.anggota_2].filter(String).map(function (id) {
+      var u = findBy_('PETUGAS', 'id_petugas', id); return u ? u.nama.replace(/,/g, ' ').trim() : '';
+    }).filter(String).join(' & ');
+    if (nama && nama !== k.nama) {
+      updateBy_('FASILITATOR', 'id_fasilitator', k.id_fasilitator, { nama: nama });
+      renameFasilitatorDiData_(k.nama, nama);
+    }
+  });
+}
+
+/**
+ * Migrasi sekali: akun login lama (satu akun per PASANGAN di sheet FASILITATOR) → akun per ORANG di Kelola User.
+ * - Fasilitator 1 mendapat username & password lama (login tetap sama).
+ * - Fasilitator 2 dibuatkan akun baru (username dari nama depan, password acak — admin tinggal reset password).
+ * - Kelas menyimpan keduanya di anggota_1 / anggota_2. Dipanggil di dalam withLock_.
+ */
+function migrasiAkunFasilitator_() {
+  var kelas = readAll_('FASILITATOR');
+  var lama = kelas.filter(function (k) { return k.pin_hash || (!k.anggota_1 && !k.anggota_2 && k.username); });
+  if (!lama.length) return 0;
+  var users = readAll_('PETUGAS');
+  var n = parseInt(nextId_('PETUGAS', 'id_petugas', 'PTG', 3).substring(3), 10);
+  function idBaru() { var x = String(n++); while (x.length < 3) x = '0' + x; return 'PTG' + x; }
+  function usernameBaru(nama) {
+    var dasar = String(nama || '').toLowerCase().split(' ').filter(function (w) { return w && w.indexOf('.') === -1; })[0] || 'fasil';
+    dasar = dasar.replace(/[^a-z0-9]/g, '').substring(0, 14) || 'fasil';
+    var u = dasar, i = 2;
+    function dipakai(x) {
+      return users.some(function (p) { return p.username === x; }) || kelas.some(function (k) { return k.username === x; }) ||
+        readAll_('ADMIN').some(function (a) { return a.username === x; });
+    }
+    while (dipakai(u)) u = dasar + (i++);
+    return u;
+  }
+  lama.forEach(function (k) {
+    var nama = String(k.nama || '').split(' & ').map(function (x) { return x.trim(); }).filter(String);
+    var ids = [];
+    nama.slice(0, 2).forEach(function (nm, i) {
+      var rec = { id_petugas: idBaru(), nama: nm, program_ids: '', status: k.status || 'Aktif', jenis: 'fasilitator' };
+      if (i === 0 && k.username && k.pin_hash) { rec.username = k.username; rec.salt = k.salt; rec.pin_hash = k.pin_hash; }
+      else { rec.username = usernameBaru(nm); rec.salt = newSalt_(); rec.pin_hash = hash_(passwordAcak_() + Utilities.getUuid(), rec.salt); }
+      users.push(rec);
+      appendRow_('PETUGAS', rec);
+      ids.push(rec.id_petugas);
+    });
+    updateBy_('FASILITATOR', 'id_fasilitator', k.id_fasilitator, { username: '', pin_hash: '', salt: '', anggota_1: ids[0] || '', anggota_2: ids[1] || '' });
+    destroySessionsOf_('fasilitator', k.id_fasilitator);
+  });
+  logActivity_('sistem', 'sistem', 'Migrasi akun fasilitator per orang: ' + lama.length + ' kelas');
+  return lama.length;
 }
 
 /**

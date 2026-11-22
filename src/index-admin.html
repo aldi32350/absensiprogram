@@ -188,6 +188,7 @@
       });
     };
 
+    App.enhanceSelects();   // semua filter memakai dropdown profesional
     App.loading(true);
     App.restoreSession(['admin', 'pendataan', 'fasilitator', 'petugas']).then(function (s) {
       if (s && App.pindahHalamanSesuaiPeran(s, 'admin')) return;

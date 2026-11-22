@@ -18,10 +18,10 @@
   <div class="table-wrap" id="fsTabel" hidden>
     <table class="table">
       <thead><tr>
-        <th>Nama fasilitator</th><th>Kelas</th><th class="hide-sm-col">No HP</th><th class="hide-sm-col">JK</th>
+        <th>Nama fasilitator</th><th>Kelas</th><th class="hide-sm-col">No HP</th>
         <th>Jamaah binaan</th><th>Status</th><th style="text-align:right">Aksi</th>
       </tr></thead>
-      <tbody id="fsBody"><tr><td colspan="7" class="empty">Memuat…</td></tr></tbody>
+      <tbody id="fsBody"><tr><td colspan="6" class="empty">Memuat…</td></tr></tbody>
     </table>
   </div>
 </section>
@@ -29,13 +29,13 @@
 <script>
 (function () {
   var $ = App.$;
-  var state = { rows: [], tanpa: 0 };
+  var state = { rows: [], tanpa: 0, users: [] };
   function jk(v) { return v === 'L' ? 'Ikhwan' : v === 'P' ? 'Akhwat' : '–'; }
   var KELAS = ["Iqro' 1", "Iqro' 2", "Iqro' 3", "Iqro' 4", "Iqro' 5", "Iqro' 6", "Qur'an Kecil", "Qur'an Sedang", "Qur'an Besar"];
 
   function load() {
     return App.api('listFasilitator').then(function (d) {
-      state.rows = d.rows; state.tanpa = d.tanpa_fasilitator; render();
+      state.rows = d.rows; state.tanpa = d.tanpa_fasilitator; state.users = d.users || []; render();
     }).catch(function (e) { App.toast(e.message, 'err'); });
   }
 
@@ -61,7 +61,6 @@
         '<td>' + pasangan(f.nama).map(function (n) { return '<b style="display:block">' + App.esc(n) + '</b>'; }).join('') + '<div class="dim mono">' + App.esc(f.id_fasilitator) + '</div></td>' +
         '<td>' + (f.kelas ? '<b>' + App.esc(f.kelas) + '</b>' : '<span class="dim">–</span>') + (f.kategori ? '<div class="dim">' + App.esc(f.kategori) + '</div>' : '') + '</td>' +
         '<td class="hide-sm-col mono">' + App.esc(f.no_hp || '–') + '</td>' +
-        '<td class="hide-sm-col">' + jk(f.jenis_kelamin) + '</td>' +
         '<td><button class="link" data-act="binaan">' + f.jamaah_aktif + ' aktif</button><span class="dim"> / ' + f.jumlah_jamaah + ' total</span></td>' +
         '<td>' + App.statusBadge(f.status) + '</td>' +
         '<td><div class="actions">' +
@@ -69,13 +68,18 @@
           '<button class="btn" data-act="edit" title="Edit pasangan / kelas"><i data-lucide="pencil"></i></button>' +
           '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
         '</div></td></tr>';
-    }).join('') : '<tr><td colspan="7" class="empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</td></tr>';
     // --- Kartu kelas ---
     var q = App.norm($('#fsSearch').value);
     var grup = {};
     list.forEach(function (f) { var k = f.kategori || 'Belum ada kategori'; (grup[k] = grup[k] || []).push(f); });
     var urut = ['Ibu & Bapak', 'Remaja & Anak', 'Belum ada kategori'].filter(function (k) { return grup[k]; });
-    $('#fsKartu').innerHTML = list.length ? urut.map(function (k) {
+    var bebas = state.users.filter(function (u) { return !u.kelas && u.status === 'Aktif'; });
+    var infoBebas = '<div class="fk-bebas card"><div class="fk-bebas-h"><i data-lucide="user-round-plus"></i><div><b>Fasilitator belum punya kelas</b>' +
+        '<span class="dim">Akun dari menu Kelola User · pasangkan lewat Tambah Fasilitator atau Edit kelas</span></div></div>' +
+        (bebas.length ? '<div class="fk-bebas-list">' + bebas.map(function (u) { return '<span class="fk-chip"><i data-lucide="user-round"></i>' + App.esc(u.nama) + '</span>'; }).join('') + '</div>'
+                      : '<div class="dim" style="font-size:13px">Semua fasilitator sudah punya kelas.</div>') + '</div>';
+    $('#fsKartu').innerHTML = infoBebas + (list.length ? urut.map(function (k) {
       var jml = 0; grup[k].forEach(function (f) { jml += f.jamaah_aktif; });
       return '<div class="fk-grup"><div class="fk-grup-h"><b>' + App.esc(k) + '</b><span class="dim">' + grup[k].length + ' kelas · ' + jml + ' jamaah</span></div>' +
         '<div class="fk-grid">' + grup[k].map(function (f) {
@@ -94,34 +98,43 @@
               '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
             '</div></div>';
         }).join('') + '</div></div>';
-    }).join('') : '<div class="card empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</div>';
+    }).join('') : '<div class="card empty">Belum ada kelas. Klik "Tambah Fasilitator".</div>');
     App.icons();
   }
 
   /** "A & B" → ['A', 'B'] */
   function pasangan(nama) { return String(nama || '').split(/\s+&\s+/).filter(String); }
 
+  /** Pilihan fasilitator (akun dari Kelola User). Yang sudah di kelas lain diberi keterangan. */
+  function pilihUser(name, label, rec) {
+    var cur = rec ? rec[name] : '';
+    return '<label class="field"><span>' + label + '</span><select class="input" name="' + name + '"><option value="">— pilih —</option>' +
+      state.users.map(function (u) {
+        var lain = u.kelas && (!rec || u.kelas !== rec.nama);
+        return '<option value="' + App.esc(u.id_petugas) + '">' + App.esc(u.nama) + (lain ? ' (sudah di kelas lain)' : '') + (u.status !== 'Aktif' ? ' (nonaktif)' : '') + '</option>';
+      }).join('') + '</select></label>';
+  }
+
   function form(rec) {
     var isEdit = !!rec;
     App.formModal({
       title: isEdit ? 'Edit Fasilitator' : 'Tambah Fasilitator',
-      values: rec ? Object.assign({}, rec, { f1: pasangan(rec.nama)[0] || '', f2: pasangan(rec.nama).slice(1).join(' & ') }) : { status: 'Aktif' },
+      values: rec ? Object.assign({}, rec) : { status: 'Aktif' },
       html: '<div class="form-grid">' +
-        '<label class="field"><span>Fasilitator 1 *</span><input class="input" name="f1" required maxlength="60" placeholder="nama lengkap"></label>' +
-        '<label class="field"><span>Fasilitator 2 (pasangan)</span><input class="input" name="f2" maxlength="60" placeholder="kosongkan bila sendiri"></label>' +
+        pilihUser('anggota_1', 'Fasilitator 1 *', rec) + pilihUser('anggota_2', 'Fasilitator 2 (pasangan)', rec) +
+        (state.users.length ? '' : '<p class="dim full" style="margin:0">Belum ada akun fasilitator. Buat dulu di menu <b>Kelola User</b> (peran Fasilitator).</p>') +
         '<label class="field"><span>Kelas (tingkat)</span><select class="input" name="kelas"><option value="">—</option>' +
           KELAS.map(function (k) { return '<option>' + App.esc(k) + '</option>'; }).join('') + '</select></label>' +
         '<label class="field"><span>Kategori</span><select class="input" name="kategori"><option value="">—</option><option>Ibu &amp; Bapak</option><option>Remaja &amp; Anak</option></select></label>' +
         '<label class="field"><span>No HP</span><input class="input" name="no_hp" inputmode="tel" placeholder="08xxxxxxxxxx"></label>' +
-        '<label class="field"><span>Jenis kelamin</span><select class="input" name="jenis_kelamin"><option value="">—</option><option value="L">Ikhwan</option><option value="P">Akhwat</option></select></label>' +
         '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
         '<label class="field full"><span>Catatan</span><input class="input" name="catatan"></label></div>' +
-        '<p class="dim" style="margin:4px 0 0">Akun login fasilitator (username &amp; password) diatur di menu <b>Kelola User</b>.</p>' +
+        '<p class="dim" style="margin:4px 0 0">Nama, username &amp; password setiap fasilitator diatur di menu <b>Kelola User</b>. Di sini admin menentukan <b>pasangan</b> &amp; kelasnya.</p>' +
         (isEdit ? '<p class="dim" style="margin:0">Mengganti pasangan / nama juga memperbarui ' + rec.jumlah_jamaah + ' jamaah binaan dan daftar peserta program.</p>' : ''),
       onSubmit: function (v) {
-        if (/&|,/.test(v.f1 + v.f2)) throw new Error('Tulis satu nama per kolom (tanpa tanda & atau koma).');
-        v.nama = [v.f1, v.f2].map(function (x) { return (x || '').trim(); }).filter(String).join(' & ');
-        delete v.f1; delete v.f2;
+        if (!v.anggota_1) throw new Error('Pilih Fasilitator 1.');
+        if (v.anggota_1 === v.anggota_2) throw new Error('Fasilitator 1 dan 2 harus orang yang berbeda.');
+        v.nama = 'x';   // nama kelas dibuat server dari nama anggota
         if (isEdit) v.id_fasilitator = rec.id_fasilitator;
         return App.api('saveFasilitator', v);
       }

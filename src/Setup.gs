@@ -30,7 +30,8 @@ var SCHEMA = {
   // Master fasilitator (pendamping jamaah). DATA_JAMAAH.kelompok berisi NAMA fasilitator.
   // username/pin_hash/salt: akun login fasilitator (melaporkan perkembangan jamaah binaannya). Kosong = belum punya akun.
   // kelas: tingkat kelas yang dipegang (Iqro' 1 … Qur'an Besar) = indikator awal jamaah binaan; kategori: Ibu & Bapak / Remaja & Anak.
-  FASILITATOR: ['id_fasilitator', 'nama', 'no_hp', 'jenis_kelamin', 'status', 'catatan', 'username', 'pin_hash', 'salt', 'kelas', 'kategori'],
+  // anggota_1/anggota_2: id_petugas akun fasilitator (per orang, dibuat di Kelola User). nama = gabungan nama anggota (A & B).
+  FASILITATOR: ['id_fasilitator', 'nama', 'no_hp', 'jenis_kelamin', 'status', 'catatan', 'username', 'pin_hash', 'salt', 'kelas', 'kategori', 'anggota_1', 'anggota_2'],
   // Laporan perkembangan bacaan jamaah oleh fasilitator: indikator Iqro' 1 … Qur'an Besar, keputusan Tetap / Lanjut.
   LAPORAN_FASILITATOR: ['id_laporan', 'tanggal', 'id_fasilitator', 'nama_fasilitator', 'id_jamaah', 'nama_jamaah',
                         'indikator', 'keputusan', 'keterangan', 'waktu', 'id_sesi'],
