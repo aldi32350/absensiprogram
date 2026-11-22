@@ -1086,4 +1086,34 @@ html[data-theme="dark"] .pt-kpi.hero .v { color: #fff; }
   .pt-kpi .v { font-size: 24px; }
   .pt-insight p { font-size: 13.5px; }
 }
+/* Fasilitator: pilih sesi + absen */
+.lp-pilih-head { margin: 4px 0 14px; }
+#lpPilih { display: grid; gap: 12px; max-width: 640px; }
+#lpPilih[hidden], #lpMain[hidden] { display: none; }
+.lp-sesi-pilih { padding: 16px; display: grid; gap: 12px; }
+.lp-sesi-pilih .pt-top { display: flex; gap: 12px; align-items: center; }
+.lp-sesi-pilih .pt-ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: rgba(5,150,105,.12); color: #047857; flex: none; }
+.lp-sesi-pilih .pt-ic svg { width: 22px; height: 22px; }
+.lp-sesi-pilih .grow { flex: 1; min-width: 0; }
+.lp-sesi-pilih .pt-name { font-weight: 800; font-size: 16px; }
+.lp-sesi-pilih .pt-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.lp-sesi-pilih .pt-sub .ok { color: #047857; } .lp-sesi-pilih .pt-sub .bad { color: #b91c1c; }
+.lp-sesi-pilih .btn.xl { min-height: 50px; font-size: 15px; }
+.lp-pilih-foot { display: flex; flex-wrap: wrap; gap: 8px; }
+.lp-sesi { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; margin-bottom: 12px; flex-wrap: wrap; }
+.lp-sesi-info { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
+.lp-sesi-info .dim { font-size: 12.5px; }
+.lp-sesi-dot { width: 12px; height: 12px; border-radius: 50%; background: #94a3b8; flex: none; }
+.lp-sesi-dot.on { background: #10b981; box-shadow: 0 0 0 4px rgba(16,185,129,.2); }
+.lp-hello-stats { display: flex; gap: 18px; }
+.lp-card.hadir { border-color: rgba(5,150,105,.5); background: linear-gradient(rgba(5,150,105,.05), rgba(5,150,105,.05)), var(--surface); }
+.lp-card-absen { display: flex; }
+.lp-absen { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.lp-absen svg { width: 14px; height: 14px; }
+.lp-absen.hadir { background: rgba(5,150,105,.13); color: #047857; }
+.lp-absen.belum { background: var(--surface-2); color: var(--muted); }
+.lp-absen.lain { background: rgba(217,119,6,.14); color: #b45309; }
+html[data-theme="dark"] .lp-absen.hadir { color: #6ee7b7; }
+.lp-card-btns { display: flex; gap: 8px; }
+.lp-card-btns .btn { flex: 1; min-height: 46px; }
 </style>

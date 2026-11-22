@@ -104,6 +104,50 @@
     });
   };
 
+  /**
+   * Satu login untuk semua peran: petugas absensi memakai aplikasi scan (halaman utama),
+   * admin / pendataan / fasilitator memakai panel admin (?page=admin).
+   * Bila sesi dibuka di halaman yang salah → pindah ke halaman yang benar. Return true bila pindah.
+   */
+  App.pindahHalamanSesuaiPeran = function (s, halaman) {
+    var tujuan = s.role === 'petugas' ? 'petugas' : 'admin';
+    if (tujuan === halaman) return false;
+    App.loading(true);
+    location.replace(App.url + (tujuan === 'admin' ? '?page=admin' : ''));
+    return true;
+  };
+
+  /**
+   * Tombol KEMBALI di HP: jangan langsung keluar aplikasi / kembali ke halaman login.
+   * - Bila ada pop-up terbuka → pop-up itu yang ditutup.
+   * - Selain itu → muncul konfirmasi "Keluar dari aplikasi?" Ya / Tidak.
+   */
+  App.guardBack = function () {
+    if (App._guardOn) return;
+    App._guardOn = true;
+    var asking = false;
+    function pasang() { try { history.pushState({ absensiGuard: 1 }, '', location.href); } catch (e) {} }
+    pasang();
+    window.addEventListener('popstate', function () {
+      if (!App._guardOn) return;
+      pasang();                                              // tetap di halaman ini
+      var top = App.$$('.modal').pop();
+      if (top && !asking) {
+        var tutup = top.querySelector('[data-close], [data-act="no"]');
+        if (tutup) { tutup.click(); return; }
+      }
+      if (asking) return;
+      asking = true;
+      App.confirm('Keluar dari aplikasi?', 'Tekan Ya untuk keluar, atau Tidak untuk tetap di aplikasi.').then(function (yes) {
+        asking = false;
+        if (!yes) return;
+        App._guardOn = false;
+        history.go(-2);                                      // lewati penanda guard
+        setTimeout(function () { try { window.close(); } catch (e) {} }, 400);
+      });
+    });
+  };
+
   App.logout = function () {
     var tok = App.token();
     App.clearSession();

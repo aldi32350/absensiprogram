@@ -523,6 +523,7 @@ function loadRekapDb_() {
   db.petugasList.forEach(function (p) { people[p.id_petugas] = p.nama; });
   db.adminList.forEach(function (a) { people[a.id_admin] = a.nama + ' (admin)'; });
   people.IMPOR = 'Impor Google Form';
+  readAll_('FASILITATOR').forEach(function (f) { people[f.id_fasilitator] = f.nama + ' (fasilitator)'; });
   db.namaPetugas = function (id) { return people[id] || id || ''; };
   var pcache = {};
   db.pesertaIds = function (pid) {

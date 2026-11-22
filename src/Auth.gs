@@ -112,6 +112,71 @@ function loginFasilitator(username, pin) {
   });
 }
 
+/**
+ * SATU login untuk semua akun: username + password. Peran ditentukan oleh akunnya (diatur admin di Kelola User):
+ *   admin · pendataan · fasilitator → halaman admin · petugas (absensi) → aplikasi scan.
+ * (Password petugas/pendataan/fasilitator = PIN lama; disimpan sebagai hash di kolom pin_hash.)
+ */
+function login(username, password) {
+  return respond_(function () {
+    username = clean_(username).toLowerCase();
+    password = String(password === null || password === undefined ? '' : password);
+    if (!username || !password) throw new Error('Username dan password wajib diisi.');
+    checkLoginBlock_('user', username);
+    function gagal() {
+      registerLoginFail_('user', username);
+      logActivity_(username, '-', 'Login GAGAL');
+      throw new Error('Username atau password salah.');
+    }
+    var sess;
+    var adm = findBy_('ADMIN', 'username', username);
+    if (adm) {
+      if (adm.password_hash !== hash_(password, adm.salt)) gagal();
+      sess = createSession_({ role: 'admin', id: adm.id_admin, nama: adm.nama, username: adm.username });
+    } else {
+      var p = findBy_('PETUGAS', 'username', username);
+      if (p) {
+        if (p.pin_hash !== hash_(password, p.salt)) gagal();
+        if (p.status !== 'Aktif') throw new Error('Akun nonaktif. Hubungi admin.');
+        sess = p.jenis === 'pendataan'
+          ? createSession_({ role: 'pendataan', id: p.id_petugas, nama: p.nama, username: p.username })
+          : createSession_({ role: 'petugas', id: p.id_petugas, nama: p.nama, username: p.username, programs: splitList_(p.program_ids) });
+      } else {
+        var f = findBy_('FASILITATOR', 'username', username);
+        if (!f || !f.pin_hash || f.pin_hash !== hash_(password, f.salt)) gagal();
+        if (f.status !== 'Aktif') throw new Error('Akun nonaktif. Hubungi admin.');
+        sess = createSession_({ role: 'fasilitator', id: f.id_fasilitator, nama: f.nama, username: f.username });
+      }
+    }
+    clearLoginFail_('user', username);
+    logActivity_(sess.username, sess.role, 'Login');
+    return sess;
+  });
+}
+
+/** Aturan password akun petugas / pendataan / fasilitator (PIN lama tetap berlaku). */
+function cekPasswordUser_(pw) {
+  pw = String(pw || '');
+  if (pw.length < 4 || pw.length > 64) throw new Error('Password minimal 4 karakter (maks. 64).');
+  if (/^\s|\s$/.test(pw)) throw new Error('Password tidak boleh diawali / diakhiri spasi.');
+  return pw;
+}
+
+/** Username harus unik di semua akun (admin, petugas, pendataan, fasilitator). */
+function cekUsernameUnik_(username, tabel, id) {
+  var pakai = readAll_('ADMIN').some(function (a) { return a.username === username && !(tabel === 'ADMIN' && a.id_admin === id); }) ||
+    readAll_('PETUGAS').some(function (p) { return p.username === username && !(tabel === 'PETUGAS' && p.id_petugas === id); }) ||
+    readAll_('FASILITATOR').some(function (f) { return f.username === username && !(tabel === 'FASILITATOR' && f.id_fasilitator === id); });
+  if (pakai) throw new Error('Username "' + username + '" sudah dipakai akun lain.');
+}
+
+/** Password acak mudah dibaca (untuk reset tanpa isian). */
+function passwordAcak_() {
+  var c = 'abcdefghjkmnpqrstuvwxyz23456789', s = '';
+  for (var i = 0; i < 8; i++) s += c.charAt(Math.floor(Math.random() * c.length));
+  return s;
+}
+
 function logout(token) {
   return respond_(function () {
     var s = getSession_(token);

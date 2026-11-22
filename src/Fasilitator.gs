@@ -59,12 +59,15 @@ function saveFasilitator(token, data) {
       kelas: clean_(data.kelas),
       kategori: clean_(data.kategori)
     };
+    // Akun login diatur di Kelola User. Form Fasilitator tanpa isian username → akun login tidak diubah.
+    var aturAkun = Object.prototype.hasOwnProperty.call(data, 'username');
+    if (!aturAkun) delete rec.username;
     if (rec.kelas && INDIKATOR_JAMAAH.indexOf(rec.kelas) === -1) throw new Error('Kelas tidak valid.');
     if (rec.kategori && KATEGORI_KELAS.indexOf(rec.kategori) === -1) throw new Error('Kategori tidak valid.');
     var pin = clean_(data.pin);
     if (!rec.nama) throw new Error('Nama fasilitator wajib diisi.');
     if (rec.username && !/^[a-z0-9._]{3,20}$/.test(rec.username)) throw new Error('Username 3–20 karakter: huruf kecil, angka, titik, atau garis bawah.');
-    if (pin && !/^\d{4,6}$/.test(pin)) throw new Error('PIN harus 4–6 angka.');
+    if (pin) cekPasswordUser_(pin);
     if (rec.nama.indexOf(',') !== -1) throw new Error('Nama fasilitator tidak boleh mengandung koma (pakai "&" untuk dua orang).');
     if (rec.no_hp && !/^(\+62|62|0)8\d{7,12}$/.test(rec.no_hp)) throw new Error('Format no HP tidak valid.');
     if (STATUS_FASILITATOR.indexOf(rec.status) === -1) throw new Error('Status tidak valid.');
@@ -72,24 +75,22 @@ function saveFasilitator(token, data) {
       var all = readAll_('FASILITATOR');
       var dup = all.some(function (f) { return f.nama.toLowerCase() === rec.nama.toLowerCase() && f.id_fasilitator !== data.id_fasilitator; });
       if (dup) throw new Error('Nama fasilitator sudah ada.');
-      if (rec.username && all.some(function (f) { return f.username === rec.username && f.id_fasilitator !== data.id_fasilitator; })) {
-        throw new Error('Username sudah dipakai fasilitator lain.');
-      }
+      if (rec.username) cekUsernameUnik_(rec.username, 'FASILITATOR', data.id_fasilitator || '');
       if (pin) { rec.salt = newSalt_(); rec.pin_hash = hash_(pin, rec.salt); }
       if (data.id_fasilitator) {
         var old = findBy_('FASILITATOR', 'id_fasilitator', data.id_fasilitator);
         if (!old) throw new Error('Fasilitator tidak ditemukan.');
-        if (rec.username && !pin && !old.pin_hash) throw new Error('Isi PIN untuk membuat akun login fasilitator.');
-        if (!rec.username) { rec.pin_hash = ''; rec.salt = ''; }   // username dikosongkan = akun login dihapus
+        if (rec.username && !pin && !old.pin_hash) throw new Error('Isi password untuk membuat akun login fasilitator.');
+        if (aturAkun && !rec.username) { rec.pin_hash = ''; rec.salt = ''; }   // username dikosongkan = akun login dihapus
         var saved = updateBy_('FASILITATOR', 'id_fasilitator', data.id_fasilitator, rec);
         var moved = 0;
         if (old.nama !== rec.nama) moved = renameFasilitatorDiData_(old.nama, rec.nama);
-        if (rec.status !== 'Aktif' || !rec.username || pin || rec.username !== old.username) destroySessionsOf_('fasilitator', data.id_fasilitator);
+        if (rec.status !== 'Aktif' || (aturAkun && (!rec.username || pin || rec.username !== old.username))) destroySessionsOf_('fasilitator', data.id_fasilitator);
         logActivity_(s.username, s.role, 'Edit fasilitator ' + data.id_fasilitator + ' (' + rec.nama + ')' +
           (moved ? ', ' + moved + ' jamaah ikut diperbarui' : ''));
         return publicFasil_(saved);
       }
-      if (rec.username && !pin) throw new Error('Isi PIN untuk akun login fasilitator.');
+      if (rec.username && !pin) throw new Error('Isi password untuk akun login fasilitator.');
       rec.id_fasilitator = nextId_('FASILITATOR', 'id_fasilitator', 'FSL', 3);
       appendRow_('FASILITATOR', rec);
       logActivity_(s.username, s.role, 'Tambah fasilitator ' + rec.id_fasilitator + ' (' + rec.nama + ')');
@@ -139,9 +140,8 @@ function aturFasilitatorJamaah(token, ids, namaFasilitator) {
 function resetPinFasilitator(token, id, pin) {
   return respond_(function () {
     var s = requireAuth_(token, 'admin');
-    pin = clean_(pin);
-    if (!pin) pin = String(Math.floor(1000 + Math.random() * 9000));
-    if (!/^\d{4,6}$/.test(pin)) throw new Error('PIN harus 4–6 angka.');
+    pin = String(pin || '') || passwordAcak_();
+    cekPasswordUser_(pin);
     return withLock_(function () {
       var f = findBy_('FASILITATOR', 'id_fasilitator', id);
       if (!f) throw new Error('Fasilitator tidak ditemukan.');
@@ -149,8 +149,61 @@ function resetPinFasilitator(token, id, pin) {
       var salt = newSalt_();
       updateBy_('FASILITATOR', 'id_fasilitator', id, { salt: salt, pin_hash: hash_(pin, salt) });
       destroySessionsOf_('fasilitator', id);
-      logActivity_(s.username, s.role, 'Reset PIN fasilitator ' + id + ' (' + f.username + ')');
+      logActivity_(s.username, s.role, 'Reset password fasilitator ' + id + ' (' + f.username + ')');
       return { pin: pin, username: f.username };
+    });
+  });
+}
+
+/**
+ * Kelola User: buat / ubah akun login seorang fasilitator (kelas yang sudah ada).
+ * password kosong saat edit = password lama tetap.
+ */
+function aturAkunFasilitator(token, idFasilitator, username, password) {
+  return respond_(function () {
+    var s = requireAuth_(token, 'admin');
+    username = clean_(username).toLowerCase();
+    if (!/^[a-z0-9._]{3,20}$/.test(username)) throw new Error('Username 3–20 karakter: huruf kecil, angka, titik, atau garis bawah.');
+    password = String(password || '');
+    if (password) cekPasswordUser_(password);
+    return withLock_(function () {
+      var f = findBy_('FASILITATOR', 'id_fasilitator', idFasilitator);
+      if (!f) throw new Error('Fasilitator tidak ditemukan.');
+      cekUsernameUnik_(username, 'FASILITATOR', idFasilitator);
+      if (!password && !f.pin_hash) throw new Error('Isi password untuk akun baru.');
+      var patch = { username: username };
+      if (password) { patch.salt = newSalt_(); patch.pin_hash = hash_(password, patch.salt); }
+      var saved = updateBy_('FASILITATOR', 'id_fasilitator', idFasilitator, patch);
+      if (password || username !== f.username) destroySessionsOf_('fasilitator', idFasilitator);
+      logActivity_(s.username, s.role, 'Atur akun fasilitator ' + idFasilitator + ' (' + username + ')');
+      return publicFasil_(saved);
+    });
+  });
+}
+
+/** Kelola User: hapus akun login fasilitator (kelas & jamaah binaannya tetap). */
+function hapusAkunFasilitator(token, idFasilitator) {
+  return respond_(function () {
+    var s = requireAuth_(token, 'admin');
+    return withLock_(function () {
+      var saved = updateBy_('FASILITATOR', 'id_fasilitator', idFasilitator, { username: '', pin_hash: '', salt: '' });
+      destroySessionsOf_('fasilitator', idFasilitator);
+      logActivity_(s.username, s.role, 'Hapus akun login fasilitator ' + idFasilitator);
+      return publicFasil_(saved);
+    });
+  });
+}
+
+/** Kelola User: aktif / nonaktifkan fasilitator (nonaktif = tidak bisa login). */
+function setFasilitatorStatus(token, idFasilitator, status) {
+  return respond_(function () {
+    var s = requireAuth_(token, 'admin');
+    if (STATUS_FASILITATOR.indexOf(status) === -1) throw new Error('Status tidak valid.');
+    return withLock_(function () {
+      var saved = updateBy_('FASILITATOR', 'id_fasilitator', idFasilitator, { status: status });
+      if (status !== 'Aktif') destroySessionsOf_('fasilitator', idFasilitator);
+      logActivity_(s.username, s.role, 'Status fasilitator ' + idFasilitator + ' → ' + status);
+      return publicFasil_(saved);
     });
   });
 }

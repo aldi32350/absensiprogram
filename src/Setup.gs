@@ -33,7 +33,7 @@ var SCHEMA = {
   FASILITATOR: ['id_fasilitator', 'nama', 'no_hp', 'jenis_kelamin', 'status', 'catatan', 'username', 'pin_hash', 'salt', 'kelas', 'kategori'],
   // Laporan perkembangan bacaan jamaah oleh fasilitator: indikator Iqro' 1 … Qur'an Besar, keputusan Tetap / Lanjut.
   LAPORAN_FASILITATOR: ['id_laporan', 'tanggal', 'id_fasilitator', 'nama_fasilitator', 'id_jamaah', 'nama_jamaah',
-                        'indikator', 'keputusan', 'keterangan', 'waktu'],
+                        'indikator', 'keputusan', 'keterangan', 'waktu', 'id_sesi'],
   // Foto jamaah: thumbnail WebP kecil (data URL) untuk daftar + ID file foto besar di Drive (privat).
   FOTO_JAMAAH: ['id_jamaah', 'thumb', 'file_id', 'diperbarui'],
   // Profil yayasan & pengaturan kartu (kunci–nilai). Logo disimpan sebagai data URL yang dipecah per 40.000 karakter.

@@ -155,7 +155,14 @@ Jenis petugas ketiga selain admin dan petugas absensi. Admin membuatnya di menu 
 - Jika akunnya dinonaktifkan atau jenisnya diganti, sesinya langsung tidak berlaku.
 - Panel jamaah punya filter **Kelengkapan** (Data belum lengkap / Belum ada foto / Sudah lengkap). Datanya dianggap lengkap bila sudah ada Foto, Jenis kelamin, Tanggal lahir, Desa, Alamat asli, dan Kartu keluarga.
 
+## Login & Kelola User
+- Satu fungsi `login(username, password)` untuk semua akun. Peran diambil dari akunnya: ADMIN → admin, PETUGAS (jenis absensi/pendataan) → petugas/pendataan, FASILITATOR → fasilitator. Halaman otomatis menyesuaikan peran (`App.pindahHalamanSesuaiPeran`).
+- Password akun non-admin disimpan sebagai hash di kolom `pin_hash` (PIN lama tetap berlaku sebagai password). Minimal 4 karakter. Username unik di semua tabel akun.
+- Menu **Kelola User** (dulu *Petugas*): tambah/edit akun petugas absensi, pendataan, dan akun login fasilitator (`aturAkunFasilitator`, `hapusAkunFasilitator`, `setFasilitatorStatus`), reset password, aktif/nonaktif.
+- Tombol kembali di HP dijaga `App.guardBack()`: pop-up ditutup dulu, lalu konfirmasi *Keluar dari aplikasi?*.
+
 ## Fasilitator & laporan perkembangan jamaah
+- Fasilitator memilih **sesi hari ini** dulu. `fasilitatorTandaiHadir` dan `simpanLaporanFasilitator` (dengan `id_sesi`) mencatat HADIR (metode `Fasilitator`, id_petugas = id fasilitator) bila jamaah belum tercatat — dobel dengan scan petugas tanpa data ganda. Kolom `id_sesi` ditambahkan ke sheet LAPORAN FASILITATOR.
 - Satu fasilitator = satu **kelas**: `kelas` (Iqro' 1 … Qur'an Besar) dan `kategori` (Ibu & Bapak / Remaja & Anak). Jamaah yang belum pernah dilaporkan dianggap berada di tingkat kelasnya.
 - Admin menentukan jamaah binaan setiap fasilitator (menu **Fasilitator** → 👥; disimpan di kolom *Fasilitator* sheet DATA MASTER JAMAAH).
 - Akun login fasilitator memakai kolom `username`, `pin_hash`, dan `salt` di sheet FASILITATOR. Admin mengisinya lewat Edit, dan bisa reset PIN dengan 🔑.

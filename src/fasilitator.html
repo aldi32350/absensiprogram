@@ -62,7 +62,6 @@
         '<td><div class="actions">' +
           '<button class="btn" data-act="binaan" title="Atur jamaah binaan"><i data-lucide="users"></i></button>' +
           '<button class="btn" data-act="edit" title="Edit / akun login"><i data-lucide="pencil"></i></button>' +
-          (f.punya_akun ? '<button class="btn" data-act="pin" title="Reset PIN"><i data-lucide="key-round"></i></button>' : '') +
           '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
         '</div></td></tr>';
     }).join('') : '<tr><td colspan="8" class="empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</td></tr>';
@@ -83,19 +82,9 @@
         '<label class="field"><span>Jenis kelamin</span><select class="input" name="jenis_kelamin"><option value="">—</option><option value="L">Ikhwan</option><option value="P">Akhwat</option></select></label>' +
         '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
         '<label class="field full"><span>Catatan</span><input class="input" name="catatan"></label></div>' +
-        '<div class="sec-title" style="margin-top:6px">Akun login fasilitator</div>' +
-        '<p class="dim" style="margin:0 0 8px">Untuk melaporkan perkembangan jamaah binaan (Iqro&#39; / Qur&#39;an). Login di halaman Admin → tab <b>Fasilitator</b>. Kosongkan username bila tidak perlu login.</p>' +
-        '<div class="form-grid">' +
-        '<label class="field"><span>Username</span><input class="input" name="username" autocapitalize="none" spellcheck="false" placeholder="huruf kecil, mis. khansa"></label>' +
-        '<label class="field"><span>' + (isEdit && rec.punya_akun ? 'PIN baru (kosongkan bila tetap)' : 'PIN (4–6 angka)') + '</span>' +
-          '<input class="input pin-input" name="pin" inputmode="numeric" maxlength="6" autocomplete="off"></label></div>' +
+        '<p class="dim" style="margin:4px 0 0">Akun login fasilitator (username &amp; password) diatur di menu <b>Kelola User</b>.</p>' +
         (isEdit ? '<p class="dim" style="margin:0">Mengganti nama juga memperbarui ' + rec.jumlah_jamaah + ' jamaah binaan dan daftar peserta program.</p>' : ''),
-      onOpen: function (fm) { fm.pin.addEventListener('input', function () { fm.pin.value = fm.pin.value.replace(/\D/g, '').slice(0, 6); }); },
       onSubmit: function (v) {
-        v.username = (v.username || '').toLowerCase();
-        if (v.username && !/^[a-z0-9._]{3,20}$/.test(v.username)) throw new Error('Username 3–20 karakter: huruf kecil, angka, titik, atau garis bawah.');
-        if (v.pin && !/^\d{4,6}$/.test(v.pin)) throw new Error('PIN harus 4–6 angka.');
-        if (v.username && !v.pin && !(isEdit && rec.punya_akun)) throw new Error('Isi PIN untuk akun login fasilitator.');
         if (isEdit) v.id_fasilitator = rec.id_fasilitator;
         return App.api('saveFasilitator', v);
       }

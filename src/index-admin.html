@@ -147,6 +147,7 @@
       App.$('#meAvatar').textContent = (s.nama || 'A').split(/\s+/).map(function (w) { return w[0]; }).slice(0, 2).join('').toUpperCase();
       var hash = (location.hash || '').replace('#', '');
       Admin.go(hash || Admin.order[0]);
+      App.guardBack();
     }
     App.showLogin = showLogin;
     App.onLoggedIn = showApp;
@@ -188,7 +189,8 @@
     };
 
     App.loading(true);
-    App.restoreSession(['admin', 'pendataan', 'fasilitator']).then(function (s) {
+    App.restoreSession(['admin', 'pendataan', 'fasilitator', 'petugas']).then(function (s) {
+      if (s && App.pindahHalamanSesuaiPeran(s, 'admin')) return;
       App.loading(false);
       if (s) showApp(s); else showLogin();
     });

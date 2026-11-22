@@ -1,4 +1,4 @@
-<!-- login-petugas.html — login petugas (username + PIN). Tampilan SAMA: panel kiri (hero) + panel kanan (form). -->
+<!-- login-petugas.html — SATU login untuk semua akun (username + password); peran akun menentukan halaman. -->
 <section id="loginPetugas" class="auth-page" hidden>
   <div class="auth-top">
     <div class="seg" role="group" aria-label="Pilih tema">
@@ -27,25 +27,21 @@
       </div>
       <div>
         <h1>Masuk ke akun Anda</h1>
-        <p class="lead">Pilih jenis akun, lalu masukkan username dan password / PIN.</p>
-      </div>
-      <div class="auth-tabs auth-tabs-4" role="tablist" aria-label="Jenis akun">
-        <a role="tab" aria-selected="false" id="linkToAdmin" target="_top" href="#"><i data-lucide="shield-check"></i>Admin</a>
-        <a role="tab" aria-selected="false" id="linkToPendataan" target="_top" href="#" title="Login pendataan di halaman Admin → tab Pendataan"><i data-lucide="clipboard-pen"></i>Pendataan</a>
-        <a role="tab" aria-selected="false" id="linkToFasil" target="_top" href="#"><i data-lucide="book-open-check"></i>Fasilitator</a>
-        <button type="button" role="tab" aria-selected="true"><i data-lucide="scan-barcode"></i>Petugas</button>
+        <p class="lead">Masukkan username dan password dari admin. Halaman yang terbuka menyesuaikan peran akun Anda.</p>
       </div>
       <form class="auth-form" id="formLoginPetugas" autocomplete="on" novalidate>
         <label class="field"><span>Username</span>
-          <input class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="mis. petugas1" required></label>
-        <label class="field"><span>PIN</span>
-          <input class="input pin-input" name="pin" type="password" inputmode="numeric" pattern="[0-9]*"
-                 maxlength="6" autocomplete="current-password" placeholder="••••" required></label>
+          <input class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="username" required></label>
+        <label class="field"><span>Password</span>
+          <div class="auth-pw">
+            <input class="input" name="password" type="password" autocomplete="current-password" required>
+            <button type="button" class="toggle-eye" aria-label="Tampilkan password"><i data-lucide="eye"></i></button>
+          </div></label>
         <div class="error-text" id="loginPetugasErr" role="alert"></div>
         <button class="btn primary block" type="submit"><i data-lucide="log-in"></i> Masuk</button>
       </form>
       <div class="auth-info"><i data-lucide="info"></i>
-        <span>Akun petugas dibuat oleh admin. <b>Lupa password / PIN atau akun dinonaktifkan?</b> Hubungi admin untuk direset.</span></div>
+        <span>Semua akun (admin, petugas, pendataan, fasilitator) dibuat oleh admin. <b>Lupa password atau akun dinonaktifkan?</b> Hubungi admin untuk direset.</span></div>
     </div>
   </main>
 </section>
@@ -54,36 +50,36 @@
 (function () {
   var form = App.$('#formLoginPetugas');
   var err = App.$('#loginPetugasErr');
-  App.$('#linkToAdmin').href = App.url + '?page=admin';
-  App.$('#linkToPendataan').href = App.url + '?page=admin&login=pendataan';
-  App.$('#linkToFasil').href = App.url + '?page=admin&login=fasilitator';
-
-  // Ingat username terakhir agar petugas cukup mengetik PIN.
+  // Ingat username terakhir agar cukup mengetik password.
   var lastUser = App.store.get('absensi_last_user', '');
   if (lastUser) form.username.value = lastUser;
 
-  form.pin.addEventListener('input', function () {
-    form.pin.value = form.pin.value.replace(/\D/g, '').slice(0, 6);
+  form.querySelector('.toggle-eye').addEventListener('click', function () {
+    var inp = form.password;
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    this.setAttribute('aria-label', inp.type === 'password' ? 'Tampilkan password' : 'Sembunyikan password');
   });
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     err.textContent = '';
-    var u = form.username.value.trim(), pin = form.pin.value.trim();
-    if (!u || !pin) { err.textContent = 'Isi username dan PIN.'; return; }
-    if (!/^\d{4,6}$/.test(pin)) { err.textContent = 'PIN harus 4–6 angka.'; return; }
+    var u = form.username.value.trim(), p = form.password.value;
+    if (!u || !p) { err.textContent = 'Isi username dan password.'; return; }
     var btn = form.querySelector('button[type=submit]');
-    App.busy(btn, App.call('loginPetugas', u, pin)).then(function (s) {
+    App.busy(btn, App.call('login', u, p)).then(function (s) {
       App.saveSession(s);
       App.store.set('absensi_last_user', u);
-      form.pin.value = '';
+      form.password.value = '';
+      // Peran menentukan halaman: petugas absensi → aplikasi scan; lainnya → panel admin.
+      if (App.pindahHalamanSesuaiPeran(s, 'petugas')) return;
+      App.toast('Selamat datang, ' + s.nama, 'ok');
       if (App.onLoggedIn) App.onLoggedIn(s);
-    }).catch(function (e2) { err.textContent = e2.message; form.pin.value = ''; form.pin.focus(); });
+    }).catch(function (e2) { err.textContent = e2.message; form.password.value = ''; });
   });
 
   App.focusLoginPetugas = function () {
     if (window.innerWidth < 860) return;   // di HP jangan buka keyboard otomatis
-    setTimeout(function () { (form.username.value ? form.pin : form.username).focus(); }, 50);
+    setTimeout(function () { (form.username.value ? form.password : form.username).focus(); }, 50);
   };
 })();
 </script>

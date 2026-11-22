@@ -30,12 +30,14 @@
       document.body.classList.remove('theme-kk', 'auth-on');
       App.$('#loginPetugas').hidden = true;
       Petugas.start();
+      App.guardBack();
     }
     App.showLogin = showLogin;
     App.onLoggedIn = showApp;
 
     App.loading(true);
-    App.restoreSession('petugas').then(function (s) {
+    App.restoreSession(['petugas', 'admin', 'pendataan', 'fasilitator']).then(function (s) {
+      if (s && App.pindahHalamanSesuaiPeran(s, 'petugas')) return;
       App.loading(false);
       if (s) showApp(); else showLogin();
     });

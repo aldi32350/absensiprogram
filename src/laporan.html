@@ -2,22 +2,33 @@
      View 'lapor'   : khusus akun FASILITATOR (kartu jamaah binaan + form laporan, ramah HP).
      View 'laporan' : khusus ADMIN (rekap laporan semua fasilitator + posisi indikator jamaah). -->
 <section id="view-lapor" hidden>
-  <div class="lp-hello glass card" id="lpHello"></div>
-  <div class="toolbar lp-toolbar">
-    <div class="input-wrap search">
-      <i data-lucide="search"></i>
-      <input class="input" id="lpSearch" type="search" placeholder="Cari nama jamaah / No Jamaah…" autocomplete="off">
+  <!-- Langkah 1: pilih sesi hari ini (seperti petugas) -->
+  <div id="lpPilih" hidden></div>
+  <!-- Langkah 2: jamaah binaan — absen HADIR + laporan perkembangan -->
+  <div id="lpMain" hidden>
+    <div class="lp-sesi card" id="lpSesi"></div>
+    <div class="lp-hello glass card" id="lpHello"></div>
+    <div class="toolbar lp-toolbar">
+      <div class="input-wrap search">
+        <i data-lucide="search"></i>
+        <input class="input" id="lpSearch" type="search" placeholder="Cari nama jamaah / No Jamaah…" autocomplete="off">
+      </div>
+      <select class="input" id="lpAbsen" title="Filter kehadiran">
+        <option value="">Semua kehadiran</option>
+        <option value="belum">Belum absen</option>
+        <option value="hadir">Sudah hadir</option>
+      </select>
+      <select class="input" id="lpKeputusan" title="Filter Tetap / Lanjut">
+        <option value="">Tetap &amp; Lanjut</option>
+        <option value="Tetap">Tetap</option>
+        <option value="Lanjut">Lanjut</option>
+        <option value="__belum">Belum dilaporkan</option>
+        <option value="__hariini">Belum dilaporkan hari ini</option>
+      </select>
+      <select class="input" id="lpIndikator" title="Filter indikator"><option value="">Semua indikator</option></select>
     </div>
-    <select class="input" id="lpKeputusan" title="Filter Tetap / Lanjut">
-      <option value="">Tetap &amp; Lanjut</option>
-      <option value="Tetap">Tetap</option>
-      <option value="Lanjut">Lanjut</option>
-      <option value="__belum">Belum dilaporkan</option>
-      <option value="__hariini">Belum dilaporkan hari ini</option>
-    </select>
-    <select class="input" id="lpIndikator" title="Filter indikator"><option value="">Semua indikator</option></select>
+    <div class="lp-cards" id="lpCards"><div class="glass card empty">Memuat…</div></div>
   </div>
-  <div class="lp-cards" id="lpCards"><div class="glass card empty">Memuat…</div></div>
 </section>
 
 <section id="view-laporan" hidden>
@@ -84,21 +95,66 @@
   }
 
   /* =====================================================================
-   * FASILITATOR: daftar jamaah binaan + form laporan
+   * FASILITATOR: pilih sesi hari ini → jamaah binaan (absen HADIR + laporan)
+   * Absen fasilitator = cadangan scan petugas (dobel), tidak pernah tercatat dua kali.
    * ===================================================================== */
-  var F = { rows: [], today: '' };
+  var F = { rows: [], today: '', sesi: null, sesiHariIni: [], tanpaSesi: false, timer: null };
+  var K_SESI = 'fasil_sesi';
 
-  function loadLapor() {
-    return App.api('fasilitatorHome').then(function (d) {
-      F.rows = d.rows; F.today = d.today; F.fasil = d.fasilitator;
-      renderLapor();
-    }).catch(function (e) { App.toast(e.message, 'err'); });
+  function sesiTersimpan() {
+    var v = App.store.get(K_SESI, null);
+    return v && v.tanggal === App.today() ? v.id : '';
+  }
+  function bisaCatat() { return !!(F.sesi && F.sesi.status === 'Dibuka'); }
+
+  function loadLapor(diam) {
+    if (!diam) App.loading(true);
+    return App.api('fasilitatorHome', sesiTersimpan()).then(function (d) {
+      F.rows = d.rows; F.today = d.today; F.fasil = d.fasilitator; F.sesi = d.sesi; F.sesiHariIni = d.sesiHariIni;
+      if (!F.sesi && sesiTersimpan()) App.store.del(K_SESI);
+      if (!F.sesi && !F.tanpaSesi) renderPilih(); else renderLapor();
+    }).catch(function (e) { if (!diam) App.toast(e.message, 'err'); })
+      .finally(function () { if (!diam) App.loading(false); });
   }
 
+  /* ---------- Langkah 1: pilih sesi ---------- */
+  function renderPilih() {
+    $('#lpMain').hidden = true; $('#lpPilih').hidden = false;
+    if (Admin.current === 'lapor') Admin.setSubtitle('Pilih sesi hari ini dulu');
+    var list = F.sesiHariIni;
+    $('#lpPilih').innerHTML =
+      '<div class="lp-pilih-head"><div class="lp-hello-t">Assalamu\'alaikum, ' + esc(((App.session || {}).nama || '').split(' ')[0] || 'Fasilitator') + '</div>' +
+        '<div class="dim">' + esc(App.tgl(F.today || App.today(), true)) + ' · pilih sesi untuk mulai absen &amp; laporan jamaah binaan</div></div>' +
+      (list.length ? list.map(function (s) {
+        var buka = s.status === 'Dibuka';
+        return '<div class="card prog-tile lp-sesi-pilih">' +
+          '<div class="pt-top"><div class="pt-ic"><i data-lucide="calendar-check"></i></div>' +
+          '<div class="grow"><div class="pt-name">' + esc(s.nama_program) + '</div>' +
+          '<div class="pt-sub">' + (s.jam_mulai ? 'Mulai ' + esc(s.jam_mulai) + ' · ' : '') + s.hadir + ' hadir · ' +
+            (buka ? '<b class="ok">Sedang dibuka</b>' : '<b class="bad">Sudah ditutup</b>') + '</div></div></div>' +
+          '<button class="btn ' + (buka ? 'primary' : '') + ' xl block" data-pilih="' + esc(s.id_sesi) + '"><i data-lucide="' + (buka ? 'log-in' : 'eye') + '"></i> ' +
+            (buka ? 'Mulai di sesi ini' : 'Lihat sesi ini') + '</button></div>';
+      }).join('') : '<div class="card empty"><b>Belum ada sesi dibuka hari ini.</b><br>Sesi dibuka oleh petugas absensi. Tekan <b>Muat ulang</b> setelah sesi dibuka.</div>') +
+      '<div class="lp-pilih-foot">' +
+        '<button class="btn" data-pilih-ulang><i data-lucide="refresh-cw"></i> Muat ulang</button>' +
+        '<button class="btn ghost" data-tanpa-sesi>Lanjut tanpa sesi (hanya laporan, tanpa absen)</button>' +
+      '</div>';
+    App.icons();
+  }
+  $('#lpPilih').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-pilih]');
+    if (b) { App.store.set(K_SESI, { id: b.dataset.pilih, tanggal: App.today() }); F.tanpaSesi = false; loadLapor(); return; }
+    if (e.target.closest('[data-pilih-ulang]')) { loadLapor(); return; }
+    if (e.target.closest('[data-tanpa-sesi]')) { F.tanpaSesi = true; App.store.del(K_SESI); loadLapor(); }
+  });
+
+  /* ---------- Langkah 2: jamaah binaan ---------- */
   function lpFiltered() {
-    var q = App.norm($('#lpSearch').value), k = $('#lpKeputusan').value, ind = $('#lpIndikator').value;
+    var q = App.norm($('#lpSearch').value), k = $('#lpKeputusan').value, ind = $('#lpIndikator').value, ab = $('#lpAbsen').value;
     return F.rows.filter(function (j) {
-      var t = j.terakhir;
+      var t = j.terakhir, hadir = j.absen && j.absen.status === 'Hadir';
+      if (ab === 'belum' && j.absen) return false;
+      if (ab === 'hadir' && !hadir) return false;
       if (k === '__belum' && t) return false;
       if (k === '__hariini' && t && t.tanggal === F.today) return false;
       if ((k === 'Tetap' || k === 'Lanjut') && (!t || t.keputusan !== k)) return false;
@@ -107,52 +163,89 @@
       return true;
     });
   }
+  function absenBadge(a) {
+    if (!a) return '<span class="lp-absen belum"><i data-lucide="circle-dashed"></i>Belum absen</span>';
+    var via = a.metode === 'Fasilitator' ? 'oleh fasilitator' : /Scan|Scanner/.test(a.metode) ? 'scan kartu' : a.metode ? a.metode.toLowerCase() : '';
+    return '<span class="lp-absen ' + (a.status === 'Hadir' ? 'hadir' : 'lain') + '"><i data-lucide="' + (a.status === 'Hadir' ? 'check-circle-2' : 'info') + '"></i>' +
+      esc(a.status) + ' ' + esc(App.jam(a.waktu)) + (via ? ' · ' + esc(via) : '') + '</span>';
+  }
 
   function renderLapor() {
+    $('#lpPilih').hidden = true; $('#lpMain').hidden = false;
     var list = lpFiltered();
     var sudahHariIni = F.rows.filter(function (j) { return j.terakhir && j.terakhir.tanggal === F.today; }).length;
+    var hadirN = F.rows.filter(function (j) { return j.absen && j.absen.status === 'Hadir'; }).length;
     var belum = F.rows.filter(function (j) { return !j.terakhir; }).length;
-    if (Admin.current === 'lapor') Admin.setSubtitle(F.rows.length + ' jamaah binaan · ' + sudahHariIni + ' dilaporkan hari ini');
-    Admin.setCount('lapor', F.rows.length - sudahHariIni, false);
+    if (Admin.current === 'lapor') Admin.setSubtitle(F.rows.length + ' jamaah binaan · ' + (F.sesi ? hadirN + ' hadir · ' : '') + sudahHariIni + ' dilaporkan hari ini');
+    Admin.setCount('lapor', F.sesi ? F.rows.length - hadirN : F.rows.length - sudahHariIni, false);
+    var s = F.sesi;
+    $('#lpSesi').innerHTML = s
+      ? '<div class="lp-sesi-info"><span class="lp-sesi-dot ' + (s.status === 'Dibuka' ? 'on' : '') + '"></span><div>' +
+          '<b>' + esc(s.nama_program) + '</b><div class="dim">' + esc(App.tgl(s.tanggal, true)) + (s.jam_mulai ? ' · ' + esc(s.jam_mulai) : '') + ' · ' +
+          (s.status === 'Dibuka' ? 'sesi dibuka' : 'sesi sudah ditutup — absen tidak bisa ditambah') + '</div></div></div>' +
+        '<button class="btn" data-ganti-sesi><i data-lucide="repeat"></i> Ganti sesi</button>'
+      : '<div class="lp-sesi-info"><span class="lp-sesi-dot"></span><div><b>Tanpa sesi</b><div class="dim">hanya laporan perkembangan, kehadiran tidak dicatat</div></div></div>' +
+        '<button class="btn primary" data-ganti-sesi><i data-lucide="calendar-check"></i> Pilih sesi</button>';
     $('#lpHello').innerHTML =
       '<div><div class="lp-hello-t">Assalamu\'alaikum, ' + esc(((App.session || {}).nama || '').split(' ')[0] || 'Fasilitator') + '</div>' +
       (F.fasil && F.fasil.kelas ? '<div class="lp-hello-kelas">' + indChip(F.fasil.kelas) + '<span class="dim">' + esc(F.fasil.kategori || '') + '</span></div>' : '') +
-      '<div class="dim">' + esc(App.tgl(F.today, true)) + ' · pilih jamaah lalu tekan <b>Laporkan</b></div></div>' +
-      '<div class="lp-hello-n"><b>' + sudahHariIni + '</b>/' + F.rows.length + '<span>hari ini</span></div>' +
+      '<div class="dim">' + (bisaCatat() ? 'Tandai <b>Hadir</b> jamaah yang datang, lalu <b>Laporkan</b> perkembangannya' : 'Pilih jamaah lalu tekan <b>Laporkan</b>') + '</div></div>' +
+      '<div class="lp-hello-stats">' +
+        (s ? '<div class="lp-hello-n"><b>' + hadirN + '</b>/' + F.rows.length + '<span>hadir</span></div>' : '') +
+        '<div class="lp-hello-n"><b>' + sudahHariIni + '</b>/' + F.rows.length + '<span>dilaporkan</span></div></div>' +
       (belum ? '<div class="lp-hello-note">' + belum + ' jamaah belum pernah dilaporkan</div>' : '');
+    $('#lpAbsen').hidden = !s;
     $('#lpCards').innerHTML = !F.rows.length
       ? '<div class="glass card empty">Belum ada jamaah binaan. Admin yang menentukan jamaah untuk setiap fasilitator.</div>'
       : list.length ? list.map(function (j) {
         var t = j.terakhir, hariIni = t && t.tanggal === F.today;
-        return '<div class="lp-card' + (hariIni ? ' done' : '') + '" data-id="' + esc(j.id_jamaah) + '">' +
+        return '<div class="lp-card' + (j.absen && j.absen.status === 'Hadir' ? ' hadir' : '') + '" data-id="' + esc(j.id_jamaah) + '">' +
           '<div class="lp-card-top">' + App.avatar(j.thumb, j.nama, 52) +
             '<div class="jc-main"><div class="jc-name">' + esc(j.nama) + '</div>' +
             '<div class="jc-sub"><span class="mono">' + esc(j.id_jamaah) + '</span>' + (j.desa ? ' · ' + esc(j.desa) : '') + '</div></div>' +
-            (hariIni ? '<span class="lp-done" title="Sudah dilaporkan hari ini"><i data-lucide="check"></i></span>' : '') +
+            (hariIni ? '<span class="lp-done" title="Sudah dilaporkan hari ini"><i data-lucide="clipboard-check"></i></span>' : '') +
           '</div>' +
+          (s ? '<div class="lp-card-absen">' + absenBadge(j.absen) + '</div>' : '') +
           '<div class="lp-card-last">' + (t
             ? indChip(t.indikator) + kepBadge(t.keputusan) + '<span class="dim">' + esc(tglPendek(t.tanggal)) + '</span>'
             : (F.fasil && F.fasil.kelas ? indChip(F.fasil.kelas) + '<span class="dim">kelas awal · belum dilaporkan</span>' : '<span class="dim">Belum pernah dilaporkan</span>')) + '</div>' +
           (t && t.keterangan ? '<div class="lp-card-ket">“' + esc(t.keterangan) + '”</div>' : '') +
-          '<button type="button" class="btn ' + (hariIni ? '' : 'primary') + ' block" data-act="lapor"><i data-lucide="clipboard-pen"></i> ' +
-            (hariIni ? 'Laporkan lagi' : 'Laporkan') + '</button>' +
+          '<div class="lp-card-btns">' +
+            (bisaCatat() && !j.absen ? '<button type="button" class="btn primary" data-act="hadir"><i data-lucide="user-check"></i> Tandai Hadir</button>' : '') +
+            '<button type="button" class="btn ' + (hariIni ? '' : 'primary') + '" data-act="lapor"><i data-lucide="clipboard-pen"></i> ' + (hariIni ? 'Laporkan lagi' : 'Laporkan') + '</button>' +
+          '</div>' +
         '</div>';
       }).join('') : '<div class="glass card empty">Tidak ada jamaah yang cocok dengan filter.</div>';
     App.icons();
   }
 
+  function tandaiHadir(j) {
+    App.confirm('Tandai HADIR?', j.nama + ' dicatat HADIR di sesi ' + F.sesi.nama_program + ' hari ini.').then(function (yes) {
+      if (!yes) return;
+      App.loading(true);
+      App.api('fasilitatorTandaiHadir', F.sesi.id_sesi, j.id_jamaah).then(function (r) {
+        j.absen = { status: r.status, waktu: r.waktu, metode: r.metode };
+        App.toast(r.baru ? j.nama + ' tercatat HADIR' : j.nama + ' sudah tercatat ' + r.status + ' jam ' + App.jam(r.waktu), r.baru ? 'ok' : 'warn');
+        renderLapor();
+      }).catch(function (e) { App.toast(e.message, 'err', 5000); loadLapor(true); })
+        .finally(function () { App.loading(false); });
+    });
+  }
+
   function openLapor(j) {
     var t = j.terakhir;
+    var catat = bisaCatat() && !j.absen;
     App.formModal({
       title: 'Laporan Jamaah',
       okText: 'Kirim Laporan',
       confirmTitle: 'Kirim laporan?',
-      confirmText: 'Laporan untuk ' + j.nama + ' akan disimpan.',
+      confirmText: 'Laporan untuk ' + j.nama + ' akan disimpan' + (catat ? ' dan ' + j.nama + ' otomatis tercatat HADIR di sesi hari ini.' : '.'),
       values: { indikator: saranIndikator(t), keputusan: '' },
       html:
         '<div class="lp-form-head">' + App.avatar(j.thumb, j.nama, 56) +
           '<div><div class="dim" style="font-size:12px">Nama jamaah</div><div class="jc-name" style="font-size:17px">' + esc(j.nama) + '</div>' +
           '<div class="dim mono" style="font-size:12px">' + esc(j.id_jamaah) + (j.desa ? ' · ' + esc(j.desa) : '') + '</div></div></div>' +
+        (F.sesi ? '<div class="lp-form-last">' + (catat ? '<span class="lp-absen hadir"><i data-lucide="user-check"></i>Otomatis tercatat HADIR saat laporan dikirim</span>' : absenBadge(j.absen)) + '</div>' : '') +
         (t ? '<div class="lp-form-last">Terakhir: ' + indChip(t.indikator) + kepBadge(t.keputusan) + '<span class="dim">' + esc(tglPendek(t.tanggal)) + '</span></div>' : '') +
         '<label class="field"><span>Indikator jamaah *</span><select class="input" name="indikator" required>' +
           IND.map(function (x) { return '<option>' + esc(x) + '</option>'; }).join('') + '</select></label>' +
@@ -171,11 +264,13 @@
       onSubmit: function (v) {
         if (!v.keputusan) throw new Error('Pilih Tetap atau Lanjut.');
         v.id_jamaah = j.id_jamaah;
+        v.id_sesi = bisaCatat() ? F.sesi.id_sesi : '';
         return App.api('simpanLaporanFasilitator', v);
       }
     }).then(function (saved) {
       if (!saved) return;
-      App.toast('Laporan tersimpan: ' + j.nama + ' · ' + saved.indikator + ' · ' + saved.keputusan, 'ok');
+      if (saved.absen) j.absen = { status: saved.absen.status, waktu: saved.absen.waktu, metode: saved.absen.metode };
+      App.toast('Laporan tersimpan: ' + j.nama + ' · ' + saved.indikator + ' · ' + saved.keputusan + (saved.absen && saved.absen.baru ? ' · tercatat HADIR' : ''), 'ok');
       j.terakhir = { tanggal: saved.tanggal, indikator: saved.indikator, keputusan: saved.keputusan, keterangan: saved.keterangan };
       renderLapor();
     });
@@ -183,17 +278,26 @@
 
   var tl;
   $('#lpSearch').addEventListener('input', function () { clearTimeout(tl); tl = setTimeout(renderLapor, 120); });
-  $('#lpKeputusan').addEventListener('change', renderLapor);
-  $('#lpIndikator').addEventListener('change', renderLapor);
+  ['#lpKeputusan', '#lpIndikator', '#lpAbsen'].forEach(function (id) { $(id).addEventListener('change', renderLapor); });
+  $('#lpSesi').addEventListener('click', function (e) {
+    if (!e.target.closest('[data-ganti-sesi]')) return;
+    F.tanpaSesi = false; App.store.del(K_SESI); F.sesi = null; loadLapor();
+  });
   $('#lpCards').addEventListener('click', function (e) {
     var c = e.target.closest('.lp-card[data-id]'); if (!c) return;
     var j = F.rows.filter(function (x) { return x.id_jamaah === c.dataset.id; })[0];
-    if (j) openLapor(j);
+    if (!j) return;
+    if (e.target.closest('[data-act=hadir]')) tandaiHadir(j);
+    else if (e.target.closest('[data-act=lapor]')) openLapor(j);
   });
+  // Segarkan status hadir (scan petugas) tiap 30 detik selama halaman terbuka.
+  setInterval(function () {
+    if (Admin.role === 'fasilitator' && Admin.current === 'lapor' && F.sesi && !document.hidden && !App.$$('.modal').length) loadLapor(true);
+  }, 30000);
 
   Admin.register('lapor', {
     title: 'Laporan Jamaah', nav: 'Laporan Jamaah', icon: 'clipboard-pen', only: ['fasilitator'],
-    subtitle: 'Perkembangan bacaan jamaah binaan', show: loadLapor
+    subtitle: 'Absen & perkembangan bacaan jamaah binaan', show: function () { return loadLapor(); }
   });
 
   /* =====================================================================

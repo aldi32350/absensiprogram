@@ -12,7 +12,9 @@ function listPetugas(token) {
       return { id_program: p.id_program, nama_program: p.nama_program, status: p.status };
     });
     var rows = readAll_('PETUGAS').map(publicPetugas_);
-    return { rows: rows, programs: programs };
+    // Kelola User juga menampilkan akun login fasilitator (dan kelas yang bisa diberi akun).
+    var fasilitator = readAll_('FASILITATOR').map(publicFasil_).sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); });
+    return { rows: rows, programs: programs, fasilitator: fasilitator };
   });
 }
 
@@ -38,10 +40,7 @@ function savePetugas(token, data) {
     });
 
     return withLock_(function () {
-      var taken = readAll_('PETUGAS').some(function (p) {
-        return p.username === rec.username && p.id_petugas !== data.id_petugas;
-      });
-      if (taken) throw new Error('Username sudah dipakai petugas lain.');
+      cekUsernameUnik_(rec.username, 'PETUGAS', data.id_petugas || '');
 
       if (data.id_petugas) {
         var saved = updateBy_('PETUGAS', 'id_petugas', data.id_petugas, rec);
@@ -49,8 +48,7 @@ function savePetugas(token, data) {
         logActivity_(s.username, s.role, 'Edit petugas ' + data.id_petugas + ' (' + rec.username + ')');
         return publicPetugas_(saved);
       }
-      var pin = clean_(data.pin);
-      if (!/^\d{4,6}$/.test(pin)) throw new Error('PIN wajib 4–6 angka.');
+      var pin = cekPasswordUser_(data.password || data.pin);
       rec.id_petugas = nextId_('PETUGAS', 'id_petugas', 'PTG', 3);
       rec.salt = newSalt_();
       rec.pin_hash = hash_(pin, rec.salt);
@@ -78,14 +76,13 @@ function setPetugasStatus(token, id, status) {
 function resetPinPetugas(token, id, pin) {
   return respond_(function () {
     var s = requireAuth_(token, 'admin');
-    pin = clean_(pin);
-    if (!pin) pin = String(Math.floor(1000 + Math.random() * 9000));
-    if (!/^\d{4,6}$/.test(pin)) throw new Error('PIN harus 4–6 angka.');
+    pin = String(pin || '') || passwordAcak_();
+    cekPasswordUser_(pin);
     return withLock_(function () {
       var salt = newSalt_();
       var saved = updateBy_('PETUGAS', 'id_petugas', id, { salt: salt, pin_hash: hash_(pin, salt) });
       destroySessionsOf_('petugas', id); destroySessionsOf_('pendataan', id);
-      logActivity_(s.username, s.role, 'Reset PIN petugas ' + id + ' (' + saved.username + ')');
+      logActivity_(s.username, s.role, 'Reset password petugas ' + id + ' (' + saved.username + ')');
       return { pin: pin, username: saved.username };
     });
   });
