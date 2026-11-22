@@ -148,7 +148,8 @@
         '<td><div class="actions">' +
           (isAdmin ? '<button class="btn" data-act="kartu" title="Cetak kartu"><i data-lucide="id-card"></i></button>' : '') +
           '<button class="btn" data-act="edit" title="Lengkapi / edit"><i data-lucide="pencil"></i></button>' +
-          (isAdmin ? '<button class="btn" data-act="toggle" title="' + (on ? 'Nonaktifkan' : 'Aktifkan') + '"><i data-lucide="' + (on ? 'user-x' : 'user-check') + '"></i></button>' : '') +
+          (isAdmin ? '<button class="btn" data-act="toggle" title="' + (on ? 'Nonaktifkan' : 'Aktifkan') + '"><i data-lucide="' + (on ? 'user-x' : 'user-check') + '"></i></button>' +
+            '<button class="btn btn-hapus" data-act="hapus" title="Hapus data jamaah"><i data-lucide="trash-2"></i></button>' : '') +
         '</div></td></tr>';
     }).join('') : '<tr><td colspan="9" class="empty">Tidak ada jamaah yang cocok.</td></tr>';
     // Kartu untuk HP: foto, nama, ID · desa, data yang masih kurang, tombol Edit besar.
@@ -308,7 +309,8 @@
       '<div class="row" style="margin-top:16px">' +
         '<button class="btn primary sm" data-d="edit"><i data-lucide="pencil"></i> Edit data &amp; foto</button>' +
         (Admin.role === 'admin' ? '<button class="btn sm" data-d="kartu"><i data-lucide="id-card"></i> Cetak kartu</button>' +
-          '<button class="btn sm" data-d="rekap"><i data-lucide="chart-column"></i> Rekap kehadiran</button>' : '') + '</div>';
+          '<button class="btn sm" data-d="rekap"><i data-lucide="chart-column"></i> Rekap kehadiran</button>' +
+          '<button class="btn sm btn-hapus" data-d="hapus"><i data-lucide="trash-2"></i> Hapus</button>' : '') + '</div>';
     App.modal({
       title: 'Detail Jamaah', html: html, okText: 'Tutup', cancelText: false,
       onOpen: function (wrap) {
@@ -317,6 +319,7 @@
           var b = e.target.closest('[data-d]'); if (!b) return;
           wrap.remove();
           if (b.dataset.d === 'edit') openForm(j);
+          else if (b.dataset.d === 'hapus') hapus(j);
           else if (b.dataset.d === 'kartu') Admin.go('kartu', { ids: [j.id_jamaah] });
           else Admin.go('rekap', { jamaah: j.id_jamaah, nama: j.nama });
         });
@@ -325,6 +328,30 @@
         }).catch(function () {});
       }
     });
+  }
+
+  /** Hapus jamaah permanen (admin). Konfirmasi menyebut data terkait yang ikut terhapus. */
+  function hapus(rec) {
+    App.loading(true);
+    App.api('hapusJamaah', rec.id_jamaah, true).then(function (c) {
+      App.loading(false);
+      var ikut = [];
+      if (c.absensi) ikut.push(c.absensi + ' riwayat absensi');
+      if (c.laporan) ikut.push(c.laporan + ' laporan fasilitator');
+      if (c.foto) ikut.push('foto');
+      return App.confirm('Hapus data jamaah?',
+        rec.nama + ' (' + rec.id_jamaah + ') akan dihapus PERMANEN dan tidak bisa dikembalikan.' +
+        (ikut.length ? ' Ikut terhapus: ' + ikut.join(', ') + '.' : '') +
+        ' Bila hanya tidak aktif lagi, sebaiknya pilih Nonaktifkan.', 'Hapus', true);
+    }).then(function (yes) {
+      if (!yes) return;
+      App.loading(true);
+      return App.api('hapusJamaah', rec.id_jamaah).then(function (r) {
+        App.toast(r.nama + ' dihapus', 'ok');
+        return load();
+      });
+    }).catch(function (e) { App.toast(e.message, 'err', 5000); })
+      .finally(function () { App.loading(false); });
   }
 
   function toggle(rec) {
@@ -595,6 +622,7 @@
     if (!b) { if (!e.target.closest('a, input, label')) openDetail(rec); return; }   // klik baris → detail jamaah
     if (b.dataset.act === 'edit') openForm(rec);
     else if (b.dataset.act === 'kartu') Admin.go('kartu', { ids: [rec.id_jamaah] });
+    else if (b.dataset.act === 'hapus') hapus(rec);
     else toggle(rec);
   });
   $('#jmCards').addEventListener('click', function (e) {

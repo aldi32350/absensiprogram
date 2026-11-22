@@ -35,8 +35,10 @@ function fasilitatorHome(token, idSesi) {
     var prog = {}; readAll_('PROGRAM').forEach(function (p) { prog[p.id_program] = p; });
     var hadirN = {};
     absensi.forEach(function (a) { if (a.status === 'Hadir') hadirN[a.id_sesi] = (hadirN[a.id_sesi] || 0) + 1; });
-    var sesiHariIni = readAll_('SESI').filter(function (x) { return x.tanggal === today && prog[x.id_program] && prog[x.id_program].status === 'Aktif'; })
-      .sort(function (a, b) { return (a.jam_mulai || '').localeCompare(b.jam_mulai || ''); })
+    // Sesi hari ini + sesi hari sebelumnya yang BELUM ditutup (fasilitator masih bisa absen & melapor).
+    var sesiHariIni = readAll_('SESI').filter(function (x) {
+      return prog[x.id_program] && prog[x.id_program].status === 'Aktif' && x.tanggal <= today && (x.tanggal === today || x.status === 'Dibuka');
+    }).sort(function (a, b) { return (b.tanggal + (b.jam_mulai || '')).localeCompare(a.tanggal + (a.jam_mulai || '')); })
       .map(function (x) {
         return { id_sesi: x.id_sesi, id_program: x.id_program, nama_program: prog[x.id_program].nama_program,
                  tanggal: x.tanggal, jam_mulai: x.jam_mulai, keterangan: x.keterangan, status: x.status, hadir: hadirN[x.id_sesi] || 0 };
@@ -45,7 +47,7 @@ function fasilitatorHome(token, idSesi) {
     var sesi = sesiHariIni.filter(function (x) { return x.id_sesi === idSesi; })[0] || null;
     var hadir = {};
     if (sesi) absensi.forEach(function (a) {
-      if (a.id_sesi === sesi.id_sesi) hadir[a.id_jamaah] = { status: a.status, waktu: a.waktu_scan, metode: a.metode };
+      if (a.id_sesi === sesi.id_sesi) hadir[a.id_jamaah] = { status: a.status, waktu: a.waktu_scan, metode: a.metode, keterangan: a.keterangan };
     });
     var rows = readAll_('DATA_JAMAAH').filter(function (j) { return me.kelasByNama[j.kelompok] && j.status === 'Aktif'; })
       .sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); })
@@ -70,31 +72,43 @@ function fasilitatorHome(token, idSesi) {
   });
 }
 
+var STATUS_ABSEN_FASIL = ['Hadir', 'Izin', 'Sakit', 'Alpa'];
+
 /**
- * Catat HADIR oleh fasilitator di sesi hari ini (dobel dengan scan petugas supaya tidak ada yang terlewat).
- * Bila jamaah sudah tercatat (oleh petugas / fasilitator) → tidak dobel, dikembalikan data yang ada.
- * Dipanggil di dalam withLock_.
+ * Catat absen oleh fasilitator (dobel dengan scan petugas supaya tidak ada yang terlewat). Dipanggil di dalam withLock_.
+ * - Sesi harus masih DIBUKA (boleh dari hari sebelumnya selama belum ditutup).
+ * - Belum tercatat → dibuat. Sudah tercatat oleh fasilitator → statusnya boleh diubah.
+ * - Sudah tercatat oleh petugas (scan / manual) → tidak diubah, dikembalikan data yang ada.
  */
-function catatHadirFasil_(f, idSesi, j) {
+function catatAbsenFasil_(f, idSesi, j, status, keterangan) {
+  status = STATUS_ABSEN_FASIL.indexOf(status) !== -1 ? status : 'Hadir';
   var sesi = findBy_('SESI', 'id_sesi', idSesi);
-  if (!sesi || sesi.tanggal !== today_()) throw new Error('Sesi tidak ditemukan / bukan sesi hari ini. Pilih ulang sesi.');
+  if (!sesi) throw new Error('Sesi tidak ditemukan. Pilih ulang sesi.');
   var all = readAll_('ABSENSI'), maxNum = 0, ada = null;
   all.forEach(function (a) {
     if (a.id_sesi === idSesi && a.id_jamaah === j.id_jamaah) ada = a;
-    var n = parseInt(String(a.id_absensi).replace(/\D/g, ''), 10);
+    var n = parseInt(String(a.id_absensi).replace(/[^0-9]/g, ''), 10);
     if (n > maxNum) maxNum = n;
   });
-  if (ada) return { baru: false, status: ada.status, waktu: ada.waktu_scan, metode: ada.metode };
-  if (sesi.status !== 'Dibuka') throw new Error('Sesi sudah ditutup. Kehadiran tidak bisa dicatat lagi.');
+  var ket = clean_(keterangan).substring(0, 200) || ('Dicatat fasilitator ' + f.nama);
+  if (ada) {
+    if (ada.metode !== 'Fasilitator' || ada.status === status || sesi.status !== 'Dibuka') {
+      return { baru: false, ubah: false, status: ada.status, waktu: ada.waktu_scan, metode: ada.metode, keterangan: ada.keterangan };
+    }
+    updateBy_('ABSENSI', 'id_absensi', ada.id_absensi, { status: status, keterangan: ket, id_petugas: f.id_fasilitator });
+    return { baru: false, ubah: true, status: status, waktu: ada.waktu_scan, metode: ada.metode, keterangan: ket };
+  }
+  if (sesi.status !== 'Dibuka') throw new Error('Sesi sudah ditutup. Absen tidak bisa ditambah lagi.');
   var rec = { id_absensi: 'ABS' + ('000000' + (maxNum + 1)).slice(-6), id_sesi: idSesi, id_program: sesi.id_program,
-              id_jamaah: j.id_jamaah, status: 'Hadir', waktu_scan: now_(), id_petugas: f.id_fasilitator, metode: 'Fasilitator',
-              keterangan: 'Dicatat fasilitator ' + f.nama };
+              id_jamaah: j.id_jamaah, status: status, waktu_scan: now_(), id_petugas: f.id_fasilitator, metode: 'Fasilitator', keterangan: ket };
   appendRow_('ABSENSI', rec);
-  return { baru: true, status: 'Hadir', waktu: rec.waktu_scan, metode: rec.metode };
+  return { baru: true, ubah: false, status: status, waktu: rec.waktu_scan, metode: rec.metode, keterangan: ket };
 }
+/** Kompatibel: catat HADIR. */
+function catatHadirFasil_(f, idSesi, j) { return catatAbsenFasil_(f, idSesi, j, 'Hadir', ''); }
 
-/** Fasilitator menandai HADIR jamaah binaannya di sesi hari ini. */
-function fasilitatorTandaiHadir(token, idSesi, idJamaah) {
+/** Fasilitator mencatat absen (Hadir / Izin / Sakit / Alpa) jamaah kelasnya di sesi yang masih dibuka. */
+function fasilitatorAbsen(token, idSesi, idJamaah, status, keterangan) {
   return respond_(function () {
     var s = requireAuth_(token, 'fasilitator');
     return withLock_(function () {
@@ -102,12 +116,15 @@ function fasilitatorTandaiHadir(token, idSesi, idJamaah) {
       var j = findBy_('DATA_JAMAAH', 'id_jamaah', clean_(idJamaah).toUpperCase());
       if (!j || j.status !== 'Aktif') throw new Error('Jamaah tidak ditemukan / nonaktif.');
       if (!me.kelasByNama[j.kelompok]) throw new Error('Jamaah ini bukan binaan Anda. Hubungi admin.');
-      var r = catatHadirFasil_(me.f, clean_(idSesi), j);
-      if (r.baru) logActivity_(s.username, s.role, 'Tandai HADIR ' + j.id_jamaah + ' di sesi ' + idSesi);
+      var r = catatAbsenFasil_(me.f, clean_(idSesi), j, status, keterangan);
+      if (r.baru || r.ubah) logActivity_(s.username, s.role, (r.ubah ? 'Ubah absen ' : 'Absen ') + j.id_jamaah + ' → ' + r.status + ' di sesi ' + idSesi);
       return r;
     });
   });
 }
+
+/** Kompatibel (versi lama): tandai HADIR. */
+function fasilitatorTandaiHadir(token, idSesi, idJamaah) { return fasilitatorAbsen(token, idSesi, idJamaah, 'Hadir', ''); }
 
 /** Simpan laporan satu jamaah binaan. data: {id_jamaah, indikator, keputusan, keterangan, id_sesi?}
  *  Bila id_sesi (sesi hari ini) diisi, jamaah otomatis tercatat HADIR di sesi itu. */

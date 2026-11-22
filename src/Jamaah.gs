@@ -74,6 +74,52 @@ function gantiNoJamaah_(lama, baru) {
   });
 }
 
+/**
+ * Hapus jamaah permanen (khusus admin) — mis. data ganda / salah input.
+ * cek = true → hanya menghitung data terkait (untuk teks konfirmasi), tidak menghapus apa pun.
+ * Ikut terhapus: foto, riwayat absensi, dan laporan fasilitator jamaah tersebut.
+ */
+function hapusJamaah(token, id, cek) {
+  return respond_(function () {
+    var s = requireAuth_(token, 'admin');
+    id = clean_(id).toUpperCase();
+    function hitung() {
+      return {
+        absensi: readAll_('ABSENSI').filter(function (a) { return a.id_jamaah === id; }).length,
+        laporan: readAll_('LAPORAN_FASILITATOR').filter(function (l) { return l.id_jamaah === id; }).length,
+        foto: !!findBy_('FOTO_JAMAAH', 'id_jamaah', id)
+      };
+    }
+    var j = findBy_('DATA_JAMAAH', 'id_jamaah', id);
+    if (!j) throw new Error('Jamaah tidak ditemukan.');
+    if (cek) { var c = hitung(); c.nama = j.nama; return c; }
+    return withLock_(function () {
+      j = findBy_('DATA_JAMAAH', 'id_jamaah', id);
+      if (!j) throw new Error('Jamaah tidak ditemukan.');
+      var foto = findBy_('FOTO_JAMAAH', 'id_jamaah', id);
+      if (foto && foto.file_id) { try { DriveApp.getFileById(foto.file_id).setTrashed(true); } catch (err) { /* file sudah tidak ada */ } }
+      var n = {
+        absensi: hapusBarisJamaah_('ABSENSI', id),
+        laporan: hapusBarisJamaah_('LAPORAN_FASILITATOR', id),
+        foto: hapusBarisJamaah_('FOTO_JAMAAH', id) > 0
+      };
+      deleteBy_('DATA_JAMAAH', 'id_jamaah', id);
+      logActivity_(s.username, s.role, 'HAPUS jamaah ' + id + ' (' + j.nama + ') · ' + n.absensi + ' absensi, ' + n.laporan + ' laporan' + (n.foto ? ', foto' : '') + ' ikut terhapus');
+      n.nama = j.nama;
+      return n;
+    });
+  });
+}
+
+/** Hapus semua baris milik satu jamaah di sebuah tabel (dari bawah agar nomor baris tidak bergeser). */
+function hapusBarisJamaah_(tabel, id) {
+  var rows = readAll_(tabel).filter(function (r) { return r.id_jamaah === id; }).sort(function (a, b) { return b._row - a._row; });
+  if (!rows.length) return 0;
+  var sh = getSheet_(tabel);
+  rows.forEach(function (r) { sh.deleteRow(r._row); });
+  return rows.length;
+}
+
 /** Aktifkan / nonaktifkan jamaah (data tidak dihapus agar riwayat absensi tetap utuh). */
 function setJamaahStatus(token, id, status) {
   return respond_(function () {

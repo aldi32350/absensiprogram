@@ -17,6 +17,7 @@
         <button type="button" data-ab="" class="on">Semua</button>
         <button type="button" data-ab="belum">Belum absen</button>
         <button type="button" data-ab="hadir">Hadir</button>
+        <button type="button" data-ab="tidak">Izin/Sakit/Alpa</button>
       </div>
       <select class="input" id="lpKeputusan" title="Filter laporan">
         <option value="">Semua laporan</option>
@@ -131,18 +132,19 @@
   /* ---------- Langkah 1: pilih sesi ---------- */
   function renderPilih() {
     $('#lpMain').hidden = true; $('#lpPilih').hidden = false;
-    if (Admin.current === 'lapor') Admin.setSubtitle('Pilih sesi hari ini dulu');
+    if (Admin.current === 'lapor') Admin.setSubtitle('Pilih sesi dulu');
     var list = F.sesiHariIni;
     $('#lpPilih').innerHTML =
       '<div class="fx-hero"><div class="fx-hero-top"><div class="fx-ava">' + esc(namaDepan().charAt(0).toUpperCase()) + '</div><div>' +
         '<div class="fx-hi">Assalamu\'alaikum, ' + esc(namaDepan()) + '</div>' +
         '<div class="fx-date">' + esc(App.tgl(F.today || App.today(), true)) + '</div></div></div>' + kelasInfo() + '</div>' +
-      '<div class="fx-step"><span>1</span> Pilih sesi hari ini untuk mulai absen &amp; laporan</div>' +
+      '<div class="fx-step"><span>1</span> Pilih sesi (hari ini, atau sesi lalu yang belum ditutup)</div>' +
       (list.length ? list.map(function (s) {
         var buka = s.status === 'Dibuka';
         return '<div class="fx-sesi-opt' + (buka ? ' on' : '') + '">' +
           '<div class="fx-sesi-ic"><i data-lucide="calendar-check"></i></div>' +
-          '<div class="grow"><b>' + esc(s.nama_program) + '</b><div class="dim">' + (s.jam_mulai ? 'Mulai ' + esc(s.jam_mulai) + ' · ' : '') + s.hadir + ' jamaah hadir</div></div>' +
+          '<div class="grow"><b>' + esc(s.nama_program) + '</b><div class="dim">' + (s.tanggal !== F.today ? '<b class="fx-lalu">' + esc(App.tgl(s.tanggal, true)) + ' · belum ditutup</b> · ' : '') +
+            (s.jam_mulai ? 'Mulai ' + esc(s.jam_mulai) + ' · ' : '') + s.hadir + ' jamaah hadir</div></div>' +
           '<span class="fx-status ' + (buka ? 'on' : 'off') + '">' + (buka ? 'Dibuka' : 'Ditutup') + '</span>' +
           '<button class="btn ' + (buka ? 'primary' : '') + '" data-pilih="' + esc(s.id_sesi) + '">' + (buka ? 'Mulai' : 'Lihat') + '</button></div>';
       }).join('') : '<div class="card empty"><b>Belum ada sesi dibuka hari ini.</b><br>Sesi dibuka oleh petugas absensi. Tekan <b>Muat ulang</b> setelah sesi dibuka.</div>') +
@@ -166,6 +168,7 @@
       var t = j.terakhir, hadir = j.absen && j.absen.status === 'Hadir';
       if (ab === 'belum' && j.absen) return false;
       if (ab === 'hadir' && !hadir) return false;
+      if (ab === 'tidak' && (!j.absen || hadir)) return false;
       if (k === '__belum' && t) return false;
       if (k === '__hariini' && t && t.tanggal === F.today) return false;
       if ((k === 'Tetap' || k === 'Lanjut') && (!t || t.keputusan !== k)) return false;
@@ -177,7 +180,8 @@
   function absenBadge(a) {
     if (!a) return '<span class="lp-absen belum"><i data-lucide="circle-dashed"></i>Belum absen</span>';
     var via = a.metode === 'Fasilitator' ? 'fasilitator' : /Scan|Scanner/.test(a.metode) ? 'scan kartu' : a.metode ? a.metode.toLowerCase() : '';
-    return '<span class="lp-absen ' + (a.status === 'Hadir' ? 'hadir' : 'lain') + '"><i data-lucide="' + (a.status === 'Hadir' ? 'check-circle-2' : 'info') + '"></i>' +
+    var ic = { Hadir: 'check-circle-2', Izin: 'mail', Sakit: 'thermometer', Alpa: 'x-circle' }[a.status] || 'info';
+    return '<span class="lp-absen st-' + esc(String(a.status).toLowerCase()) + '"><i data-lucide="' + ic + '"></i>' +
       esc(a.status) + ' ' + esc(App.jam(a.waktu)) + (via ? ' · ' + esc(via) : '') + '</span>';
   }
   function stat(v, total, label, cls) {
@@ -223,7 +227,8 @@
                : (F.fasil && F.fasil.kelas ? indChip(j.kelas || F.fasil.kelas) + '<span class="fx-when">kelas awal · belum dilaporkan</span>' : '<span class="fx-when">belum pernah dilaporkan</span>')) +
           '</div>' +
           '<div class="fx-btns">' +
-            (bisaCatat() && !j.absen ? '<button type="button" class="btn primary" data-act="hadir"><i data-lucide="user-check"></i> Hadir</button>' : '') +
+            (bisaCatat() && !j.absen ? '<button type="button" class="btn primary" data-act="absen"><i data-lucide="user-check"></i> Absen</button>' : '') +
+            (bisaCatat() && j.absen && j.absen.metode === 'Fasilitator' ? '<button type="button" class="btn" data-act="absen" title="Ubah absen"><i data-lucide="repeat"></i></button>' : '') +
             '<button type="button" class="btn ' + (hariIni ? '' : 'primary-soft') + '" data-act="lapor"><i data-lucide="clipboard-pen"></i> ' + (hariIni ? 'Lapor lagi' : 'Laporkan') + '</button>' +
           '</div>' +
         '</div>';
@@ -240,7 +245,8 @@
       html: '<div class="det-wrap"><div data-dfoto>' + (th ? '<img class="foto-big" src="' + esc(th) + '" alt="">' : '<span class="ava ava-ini foto-big">' + ini + '</span>') + '</div>' +
         '<div data-dbody><div class="dim mono">' + esc(j.id_jamaah) + '</div><h2 style="margin:4px 0 10px">' + esc(j.nama) + '</h2><p class="dim">Memuat data…</p></div></div>' +
         '<div class="fx-detail-act">' +
-          (bisaCatat() && !j.absen ? '<button class="btn primary" data-d="hadir"><i data-lucide="user-check"></i> Tandai Hadir</button>' : (F.sesi ? absenBadge(j.absen) : '')) +
+          (F.sesi && j.absen ? absenBadge(j.absen) : '') +
+          (bisaCatat() && (!j.absen || j.absen.metode === 'Fasilitator') ? '<button class="btn primary" data-d="absen"><i data-lucide="user-check"></i> ' + (j.absen ? 'Ubah absen' : 'Absen') + '</button>' : '') +
           '<button class="btn" data-d="lapor"><i data-lucide="clipboard-pen"></i> Laporkan</button></div>' +
         '<div class="sec-title" style="margin-top:16px">Riwayat laporan</div><div data-driwayat><p class="dim">Memuat…</p></div>',
       onOpen: function (wrap) {
@@ -248,7 +254,7 @@
         wrap.addEventListener('click', function (e) {
           var b = e.target.closest('[data-d]'); if (!b) return;
           wrap.querySelector('[data-act=yes]').click();
-          if (b.dataset.d === 'hadir') tandaiHadir(j); else openLapor(j);
+          if (b.dataset.d === 'absen') openAbsen(j); else openLapor(j);
         });
         App.api('detailJamaahFasilitator', j.id_jamaah).then(function (d) {
           function row(label, val, full) { return '<div class="pf-item' + (full ? ' full' : '') + '"><span>' + label + '</span><b>' + (val ? val : '<i class="dim">–</i>') + '</b></div>'; }
@@ -274,17 +280,51 @@
     });
   }
 
-  function tandaiHadir(j) {
-    App.confirm('Tandai HADIR?', j.nama + ' dicatat HADIR di sesi ' + F.sesi.nama_program + ' hari ini.').then(function (yes) {
-      if (!yes) return;
-      App.loading(true);
-      App.api('fasilitatorTandaiHadir', F.sesi.id_sesi, j.id_jamaah).then(function (r) {
-        j.absen = { status: r.status, waktu: r.waktu, metode: r.metode };
-        App.toast(r.baru ? j.nama + ' tercatat HADIR' : j.nama + ' sudah tercatat ' + r.status + ' jam ' + App.jam(r.waktu), r.baru ? 'ok' : 'warn');
-        renderLapor();
-      }).catch(function (e) { App.toast(e.message, 'err', 5000); loadLapor(true); })
-        .finally(function () { App.loading(false); });
-    });
+  /** Absen oleh fasilitator: Hadir / Izin / Sakit / Alpa. Setelah HADIR → form laporan langsung terbuka. */
+  var PILIH_ABSEN = [
+    { st: 'Hadir', ic: 'user-check', ket: 'Datang mengikuti kelas' },
+    { st: 'Izin', ic: 'mail', ket: 'Tidak datang, ada izin' },
+    { st: 'Sakit', ic: 'thermometer', ket: 'Tidak datang karena sakit' },
+    { st: 'Alpa', ic: 'x-circle', ket: 'Tidak datang tanpa kabar' }
+  ];
+  function openAbsen(j) {
+    if (!bisaCatat()) return App.toast('Sesi sudah ditutup — absen tidak bisa diubah.', 'warn');
+    var awal = j.absen && j.absen.metode === 'Fasilitator' ? j.absen.status : '';
+    App.formModal({
+      title: (awal ? 'Ubah absen · ' : 'Absen · ') + j.nama,
+      okText: 'Simpan Absen',
+      confirmTitle: 'Simpan absen?',
+      confirmText: j.nama + ' akan dicatat di sesi ' + F.sesi.nama_program + ' (' + App.tgl(F.sesi.tanggal, true) + ').',
+      values: { status: awal || 'Hadir', keterangan: awal && j.absen.keterangan && j.absen.keterangan.indexOf('Dicatat fasilitator') !== 0 ? j.absen.keterangan : '' },
+      html:
+        '<div class="lp-form-head">' + App.avatar(j.thumb, j.nama, 52) +
+          '<div><div class="jc-name" style="font-size:16px">' + esc(j.nama) + '</div><div class="dim mono" style="font-size:12px">' + esc(j.id_jamaah) + '</div></div></div>' +
+        '<div class="field"><span>Status kehadiran *</span><div class="fx-absen-pilih">' +
+          PILIH_ABSEN.map(function (p) {
+            return '<label class="st-' + p.st.toLowerCase() + '"><input type="radio" name="status" value="' + p.st + '"><span><i data-lucide="' + p.ic + '"></i><b>' + p.st + '</b><small>' + p.ket + '</small></span></label>';
+          }).join('') + '</div></div>' +
+        '<label class="field" data-ket><span>Keterangan (opsional)</span><input class="input" name="keterangan" maxlength="200" placeholder="mis. izin acara keluarga"></label>' +
+        '<p class="dim" style="margin:0;font-size:12.5px" data-info-hadir>Setelah disimpan sebagai <b>Hadir</b>, form laporan perkembangan langsung terbuka.</p>',
+      onOpen: function (form) {
+        function sync() {
+          var st = (form.querySelector('[name=status]:checked') || {}).value;
+          form.querySelector('[data-info-hadir]').hidden = st !== 'Hadir';
+        }
+        App.$$('[name=status]', form).forEach(function (r) { r.addEventListener('change', sync); });
+        sync();
+      },
+      onSubmit: function (v) {
+        if (!v.status) throw new Error('Pilih status kehadiran.');
+        return App.api('fasilitatorAbsen', F.sesi.id_sesi, j.id_jamaah, v.status, v.keterangan);
+      }
+    }).then(function (r) {
+      if (!r) return;
+      j.absen = { status: r.status, waktu: r.waktu, metode: r.metode, keterangan: r.keterangan };
+      if (!r.baru && !r.ubah) App.toast(j.nama + ' sudah tercatat ' + r.status + ' oleh petugas jam ' + App.jam(r.waktu), 'warn', 4500);
+      else App.toast(j.nama + ' tercatat ' + r.status.toUpperCase(), 'ok');
+      renderLapor();
+      if (r.status === 'Hadir') openLapor(j);          // alur: absen HADIR → langsung laporan
+    }).catch(function (e) { App.toast(e.message, 'err', 5000); loadLapor(true); });
   }
 
   function openLapor(j) {
@@ -347,7 +387,7 @@
     var j = F.rows.filter(function (x) { return x.id_jamaah === c.dataset.id; })[0];
     if (!j) return;
     var b = e.target.closest('[data-act]'); if (!b) return;
-    if (b.dataset.act === 'hadir') tandaiHadir(j);
+    if (b.dataset.act === 'absen') openAbsen(j);
     else if (b.dataset.act === 'lapor') openLapor(j);
     else openDetail(j);
   });

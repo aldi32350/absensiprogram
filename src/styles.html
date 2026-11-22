@@ -1268,4 +1268,27 @@ html[data-theme="dark"] .dd-opt.pilih { color: #6ee7b7; }
 .dd-kosong { padding: 12px; font-size: 13px; color: var(--muted); text-align: center; }
 @media (max-width: 640px) { .toolbar .dd, .fx-filter .dd { flex: 1 1 calc(50% - 4px); min-width: 0; } }
 .dd-native { display: none !important; }
+.btn.btn-hapus { color: var(--err); }
+.btn.btn-hapus:hover { background: rgba(220,38,38,.08); border-color: rgba(220,38,38,.35); }
+/* Absen fasilitator: Hadir / Izin / Sakit / Alpa */
+.lp-absen.st-hadir { background: rgba(5,150,105,.13); color: #047857; }
+.lp-absen.st-izin { background: rgba(59,130,246,.12); color: #1d4ed8; }
+.lp-absen.st-sakit { background: rgba(217,119,6,.14); color: #b45309; }
+.lp-absen.st-alpa { background: rgba(220,38,38,.12); color: #b91c1c; }
+.fx-lalu { color: #b45309; }
+.fx-absen-pilih { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.fx-absen-pilih label { position: relative; cursor: pointer; }
+.fx-absen-pilih input { position: absolute; opacity: 0; pointer-events: none; }
+.fx-absen-pilih label > span { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px; border: 2px solid var(--line); border-radius: 12px; background: var(--surface); height: 100%; }
+.fx-absen-pilih label > span svg { width: 22px; height: 22px; margin-bottom: 4px; }
+.fx-absen-pilih b { font-size: 15px; } .fx-absen-pilih small { font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+.fx-absen-pilih .st-hadir svg { color: #059669; } .fx-absen-pilih .st-izin svg { color: #2563eb; }
+.fx-absen-pilih .st-sakit svg { color: #d97706; } .fx-absen-pilih .st-alpa svg { color: #dc2626; }
+.fx-absen-pilih .st-hadir input:checked + span { border-color: #059669; background: rgba(5,150,105,.08); }
+.fx-absen-pilih .st-izin input:checked + span { border-color: #2563eb; background: rgba(37,99,235,.07); }
+.fx-absen-pilih .st-sakit input:checked + span { border-color: #d97706; background: rgba(217,119,6,.08); }
+.fx-absen-pilih .st-alpa input:checked + span { border-color: #dc2626; background: rgba(220,38,38,.07); }
+.fx-absen-pilih input:focus-visible + span { outline: 2px solid #059669; outline-offset: 2px; }
+.fx-row.hadir { border-left: 4px solid #10b981; }
+@media (max-width: 640px) { .fx-seg button { font-size: 12px; padding: 8px 4px; } }
 </style>
