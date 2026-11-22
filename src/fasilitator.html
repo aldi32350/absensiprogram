@@ -3,19 +3,25 @@
   <div class="toolbar">
     <div class="input-wrap search">
       <i data-lucide="search"></i>
-      <input class="input" id="fsSearch" type="search" placeholder="Cari fasilitator / kelas…" autocomplete="off">
+      <input class="input" id="fsSearch" type="search" placeholder="Cari fasilitator, kelas, atau nama jamaah…" autocomplete="off">
     </div>
     <select class="input" id="fsStatus"><option value="Aktif">Aktif</option><option value="Nonaktif">Nonaktif</option><option value="">Semua status</option></select>
-    <span class="dim" id="fsNote"></span>
+    <div class="seg fk-mode" role="group" aria-label="Tampilan">
+      <button type="button" data-fk-mode="kartu" aria-pressed="true"><i data-lucide="layout-grid"></i>Kelas</button>
+      <button type="button" data-fk-mode="tabel" aria-pressed="false"><i data-lucide="list"></i>Tabel</button>
+    </div>
   </div>
 
-  <div class="table-wrap">
+  <!-- Tampilan kelas: pasangan fasilitator + daftar jamaahnya (seperti lembar pembagian kelas) -->
+  <div id="fsKartu"></div>
+
+  <div class="table-wrap" id="fsTabel" hidden>
     <table class="table">
       <thead><tr>
         <th>Nama fasilitator</th><th>Kelas</th><th class="hide-sm-col">No HP</th><th class="hide-sm-col">JK</th>
-        <th>Jamaah binaan</th><th>Akun login</th><th>Status</th><th style="text-align:right">Aksi</th>
+        <th>Jamaah binaan</th><th>Status</th><th style="text-align:right">Aksi</th>
       </tr></thead>
-      <tbody id="fsBody"><tr><td colspan="8" class="empty">Memuat…</td></tr></tbody>
+      <tbody id="fsBody"><tr><td colspan="7" class="empty">Memuat…</td></tr></tbody>
     </table>
   </div>
 </section>
@@ -35,7 +41,7 @@
 
   function filtered() {
     var q = App.norm($('#fsSearch').value), st = $('#fsStatus').value;
-    return state.rows.filter(function (f) { return (!st || f.status === st) && (!q || App.norm(f.nama + ' ' + f.no_hp + ' ' + f.kelas + ' ' + f.username).indexOf(q) !== -1); })
+    return state.rows.filter(function (f) { return (!st || f.status === st) && (!q || App.norm(f.nama + ' ' + f.no_hp + ' ' + f.kelas + ' ' + (f.jamaah || []).map(function (x) { return x[0] + ' ' + x[1] + ' ' + x[2]; }).join(' ')).indexOf(q) !== -1); })
       .sort(function (a, b) {
         var ka = a.kategori || '~', kb = b.kategori || '~';
         if (ka !== kb) return ka.localeCompare(kb);
@@ -52,29 +58,57 @@
     Admin.setCount('fasilitator', aktif);
     $('#fsBody').innerHTML = list.length ? list.map(function (f) {
       return '<tr data-id="' + App.esc(f.id_fasilitator) + '">' +
-        '<td><b>' + App.esc(f.nama) + '</b><div class="dim mono">' + App.esc(f.id_fasilitator) + '</div></td>' +
+        '<td>' + pasangan(f.nama).map(function (n) { return '<b style="display:block">' + App.esc(n) + '</b>'; }).join('') + '<div class="dim mono">' + App.esc(f.id_fasilitator) + '</div></td>' +
         '<td>' + (f.kelas ? '<b>' + App.esc(f.kelas) + '</b>' : '<span class="dim">–</span>') + (f.kategori ? '<div class="dim">' + App.esc(f.kategori) + '</div>' : '') + '</td>' +
         '<td class="hide-sm-col mono">' + App.esc(f.no_hp || '–') + '</td>' +
         '<td class="hide-sm-col">' + jk(f.jenis_kelamin) + '</td>' +
         '<td><button class="link" data-act="binaan">' + f.jamaah_aktif + ' aktif</button><span class="dim"> / ' + f.jumlah_jamaah + ' total</span></td>' +
-        '<td>' + (f.punya_akun ? '<span class="mono">' + App.esc(f.username) + '</span>' : '<span class="dim">Belum ada</span>') + '</td>' +
         '<td>' + App.statusBadge(f.status) + '</td>' +
         '<td><div class="actions">' +
           '<button class="btn" data-act="binaan" title="Atur jamaah binaan"><i data-lucide="users"></i></button>' +
-          '<button class="btn" data-act="edit" title="Edit / akun login"><i data-lucide="pencil"></i></button>' +
+          '<button class="btn" data-act="edit" title="Edit pasangan / kelas"><i data-lucide="pencil"></i></button>' +
           '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
         '</div></td></tr>';
-    }).join('') : '<tr><td colspan="8" class="empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</td></tr>';
+    // --- Kartu kelas ---
+    var q = App.norm($('#fsSearch').value);
+    var grup = {};
+    list.forEach(function (f) { var k = f.kategori || 'Belum ada kategori'; (grup[k] = grup[k] || []).push(f); });
+    var urut = ['Ibu & Bapak', 'Remaja & Anak', 'Belum ada kategori'].filter(function (k) { return grup[k]; });
+    $('#fsKartu').innerHTML = list.length ? urut.map(function (k) {
+      var jml = 0; grup[k].forEach(function (f) { jml += f.jamaah_aktif; });
+      return '<div class="fk-grup"><div class="fk-grup-h"><b>' + App.esc(k) + '</b><span class="dim">' + grup[k].length + ' kelas · ' + jml + ' jamaah</span></div>' +
+        '<div class="fk-grid">' + grup[k].map(function (f) {
+          var j = f.jamaah || [];
+          return '<div class="fk-card' + (f.status !== 'Aktif' ? ' off' : '') + '" data-id="' + App.esc(f.id_fasilitator) + '">' +
+            '<div class="fk-head">' + (f.kelas ? '<span class="lp-ind">' + App.esc(f.kelas) + '</span>' : '<span class="dim">Kelas belum diatur</span>') +
+              (f.status !== 'Aktif' ? App.statusBadge(f.status) : '') + '<span class="fk-n">' + j.length + ' jamaah</span></div>' +
+            '<div class="fk-pair">' + pasangan(f.nama).map(function (n) { return '<div><i data-lucide="user-round"></i>' + App.esc(n) + '</div>'; }).join('') + '</div>' +
+            (j.length ? '<ol class="fk-list">' + j.map(function (x) {
+              var cocok = q && App.norm(x[1] + ' ' + x[2] + ' ' + x[0]).indexOf(q) !== -1;
+              return '<li' + (cocok ? ' class="hit"' : '') + '><span>' + App.esc(x[1]) + '</span><small class="mono">' + App.esc(x[0]) + '</small></li>';
+            }).join('') + '</ol>' : '<div class="fk-kosong">Belum ada jamaah</div>') +
+            '<div class="fk-btns">' +
+              '<button class="btn" data-act="binaan"><i data-lucide="users"></i> Atur jamaah</button>' +
+              '<button class="btn" data-act="edit" title="Edit pasangan / kelas"><i data-lucide="pencil"></i></button>' +
+              '<button class="btn" data-act="del" title="Hapus"><i data-lucide="trash-2"></i></button>' +
+            '</div></div>';
+        }).join('') + '</div></div>';
+    }).join('') : '<div class="card empty">Belum ada fasilitator. Klik "Tambah Fasilitator".</div>';
     App.icons();
   }
+
+  /** "A & B" → ['A', 'B'] */
+  function pasangan(nama) { return String(nama || '').split(/\s+&\s+/).filter(String); }
 
   function form(rec) {
     var isEdit = !!rec;
     App.formModal({
       title: isEdit ? 'Edit Fasilitator' : 'Tambah Fasilitator',
-      values: rec || { status: 'Aktif' },
+      values: rec ? Object.assign({}, rec, { f1: pasangan(rec.nama)[0] || '', f2: pasangan(rec.nama).slice(1).join(' & ') }) : { status: 'Aktif' },
       html: '<div class="form-grid">' +
-        '<label class="field full"><span>Nama fasilitator *</span><input class="input" name="nama" required maxlength="80" placeholder="mis. Khansa & Silma (2 orang pakai &)"></label>' +
+        '<label class="field"><span>Fasilitator 1 *</span><input class="input" name="f1" required maxlength="60" placeholder="nama lengkap"></label>' +
+        '<label class="field"><span>Fasilitator 2 (pasangan)</span><input class="input" name="f2" maxlength="60" placeholder="kosongkan bila sendiri"></label>' +
         '<label class="field"><span>Kelas (tingkat)</span><select class="input" name="kelas"><option value="">—</option>' +
           KELAS.map(function (k) { return '<option>' + App.esc(k) + '</option>'; }).join('') + '</select></label>' +
         '<label class="field"><span>Kategori</span><select class="input" name="kategori"><option value="">—</option><option>Ibu &amp; Bapak</option><option>Remaja &amp; Anak</option></select></label>' +
@@ -83,8 +117,11 @@
         '<label class="field"><span>Status</span><select class="input" name="status"><option>Aktif</option><option>Nonaktif</option></select></label>' +
         '<label class="field full"><span>Catatan</span><input class="input" name="catatan"></label></div>' +
         '<p class="dim" style="margin:4px 0 0">Akun login fasilitator (username &amp; password) diatur di menu <b>Kelola User</b>.</p>' +
-        (isEdit ? '<p class="dim" style="margin:0">Mengganti nama juga memperbarui ' + rec.jumlah_jamaah + ' jamaah binaan dan daftar peserta program.</p>' : ''),
+        (isEdit ? '<p class="dim" style="margin:0">Mengganti pasangan / nama juga memperbarui ' + rec.jumlah_jamaah + ' jamaah binaan dan daftar peserta program.</p>' : ''),
       onSubmit: function (v) {
+        if (/&|,/.test(v.f1 + v.f2)) throw new Error('Tulis satu nama per kolom (tanpa tanda & atau koma).');
+        v.nama = [v.f1, v.f2].map(function (x) { return (x || '').trim(); }).filter(String).join(' & ');
+        delete v.f1; delete v.f2;
         if (isEdit) v.id_fasilitator = rec.id_fasilitator;
         return App.api('saveFasilitator', v);
       }
@@ -242,12 +279,23 @@
   var t;
   $('#fsSearch').addEventListener('input', function () { clearTimeout(t); t = setTimeout(render, 120); });
   $('#fsStatus').addEventListener('change', render);
-  $('#fsBody').addEventListener('click', function (e) {
+  function aksi(e) {
     var b = e.target.closest('[data-act]'); if (!b) return;
-    var id = b.closest('tr').dataset.id;
+    var id = b.closest('[data-id]').dataset.id;
     var f = state.rows.filter(function (x) { return x.id_fasilitator === id; })[0];
     ({ binaan: binaan, edit: form, del: del, pin: resetPin })[b.dataset.act](f);
-  });
+  }
+  $('#fsBody').addEventListener('click', aksi);
+  $('#fsKartu').addEventListener('click', aksi);
+  // Tampilan: kartu kelas (default) atau tabel — diingat di browser
+  function setMode(m) {
+    App.store.set('fs_mode', m);
+    $('#fsKartu').hidden = m !== 'kartu';
+    $('#fsTabel').hidden = m === 'kartu';
+    App.$$('[data-fk-mode]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.fkMode === m)); });
+  }
+  App.$$('[data-fk-mode]').forEach(function (b) { b.addEventListener('click', function () { setMode(b.dataset.fkMode); }); });
+  setMode(App.store.get('fs_mode', 'kartu'));
 
   Admin.register('fasilitator', {
     title: 'Fasilitator', nav: 'Fasilitator', icon: 'user-round-check', show: load,

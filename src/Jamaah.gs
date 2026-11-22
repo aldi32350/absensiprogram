@@ -36,8 +36,17 @@ function saveJamaah(token, data) {
         if (!old) throw new Error('Jamaah tidak ditemukan.');
         rec.tanggal_daftar = rec.tanggal_daftar || old.tanggal_daftar;
         if (s.role === 'pendataan') rec.status = old.status;   // aktif/nonaktif hanya oleh admin
-        var saved = updateBy_('DATA_JAMAAH', 'id_jamaah', data.id_jamaah, rec);
-        logActivity_(s.username, s.role, 'Edit jamaah ' + data.id_jamaah + ' (' + rec.nama + ')');
+        // Ganti No Jamaah (isi barcode) — khusus admin; riwayat absensi, foto & laporan ikut pindah.
+        var noBaru = clean_(data.no_jamaah_baru).toUpperCase().replace(/\s+/g, '');
+        var idAkhir = data.id_jamaah;
+        if (noBaru && noBaru !== data.id_jamaah) {
+          if (s.role !== 'admin') throw new Error('Hanya admin yang bisa mengganti No Jamaah.');
+          gantiNoJamaah_(data.id_jamaah, noBaru);
+          logActivity_(s.username, s.role, 'Ganti No Jamaah ' + data.id_jamaah + ' → ' + noBaru + ' (' + rec.nama + ')');
+          idAkhir = noBaru;
+        }
+        var saved = updateBy_('DATA_JAMAAH', 'id_jamaah', idAkhir, rec);
+        logActivity_(s.username, s.role, 'Edit jamaah ' + idAkhir + ' (' + rec.nama + ')');
         return strip_(saved);
       }
       rec.id_jamaah = nextId_('DATA_JAMAAH', 'id_jamaah', ID_PREFIX, ID_PAD);
@@ -47,6 +56,21 @@ function saveJamaah(token, data) {
       logActivity_(s.username, s.role, 'Tambah jamaah ' + rec.id_jamaah + ' (' + rec.nama + ')');
       return rec;
     });
+  });
+}
+
+/**
+ * Ubah No Jamaah lama → baru di semua tabel yang memakainya (di dalam withLock_).
+ * Kartu lama (barcode No lama) tidak berlaku lagi → kartu perlu dicetak ulang.
+ */
+function gantiNoJamaah_(lama, baru) {
+  if (!isJamaahId_(baru)) throw new Error('Format No Jamaah tidak valid (huruf besar, angka, tanda -, 4–20 karakter, mis. MIM-0150).');
+  if (findBy_('DATA_JAMAAH', 'id_jamaah', baru)) throw new Error('No Jamaah ' + baru + ' sudah dipakai jamaah lain.');
+  ['DATA_JAMAAH', 'ABSENSI', 'FOTO_JAMAAH', 'LAPORAN_FASILITATOR'].forEach(function (t) {
+    var col = SCHEMA[t].indexOf('id_jamaah') + 1;
+    if (!col) return;
+    var sh = getSheet_(t);
+    readAll_(t).forEach(function (r) { if (r.id_jamaah === lama) sh.getRange(r._row, col).setValue(baru); });
   });
 }
 

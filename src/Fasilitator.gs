@@ -13,16 +13,20 @@ function listFasilitator(token) {
     requireAuth_(token, 'admin');
     withLock_(syncFasilitatorDariJamaah_);
     var jamaah = readAll_('DATA_JAMAAH');
-    var count = {}, aktif = {};
+    var count = {}, aktif = {}, anggota = {};
     jamaah.forEach(function (j) {
       if (!j.kelompok) return;
       count[j.kelompok] = (count[j.kelompok] || 0) + 1;
-      if (j.status === 'Aktif') aktif[j.kelompok] = (aktif[j.kelompok] || 0) + 1;
+      if (j.status === 'Aktif') {
+        aktif[j.kelompok] = (aktif[j.kelompok] || 0) + 1;
+        (anggota[j.kelompok] = anggota[j.kelompok] || []).push([j.id_jamaah, j.nama, j.nama_panggilan || '']);
+      }
     });
     var rows = readAll_('FASILITATOR').map(function (f) {
       var o = publicFasil_(f);
       o.jumlah_jamaah = count[f.nama] || 0;
       o.jamaah_aktif = aktif[f.nama] || 0;
+      o.jamaah = (anggota[f.nama] || []).sort(function (a, b) { return a[1].localeCompare(b[1], 'id'); });   // [id, nama, panggilan]
       return o;
     }).sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); });
     return { rows: rows, tanpa_fasilitator: jamaah.filter(function (j) { return !j.kelompok && j.status === 'Aktif'; }).length };

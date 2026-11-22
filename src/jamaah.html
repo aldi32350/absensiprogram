@@ -175,7 +175,11 @@
   }
   function formHtml(rec) {
     return '<div class="form-grid">' +
-      (rec ? '<div class="field full"><span>No Jamaah (isi barcode)</span><div class="mono" style="font-weight:700;font-size:16px">' + App.esc(rec.id_jamaah) + '</div></div>' : '') +
+      (rec ? (Admin.role === 'admin'
+        ? '<label class="field full"><span>No Jamaah (isi barcode)</span>' +
+            '<input class="input mono" name="no_jamaah_baru" value="' + App.esc(rec.id_jamaah) + '" autocapitalize="characters" spellcheck="false" maxlength="20" style="font-weight:700;font-size:16px">' +
+            '<small class="dim" data-no-info>Bisa diganti admin (mis. MIM-0150). Riwayat absensi, foto &amp; laporan ikut pindah. <b>Kartu lama tidak berlaku — cetak ulang kartunya.</b></small></label>'
+        : '<div class="field full"><span>No Jamaah (isi barcode)</span><div class="mono" style="font-weight:700;font-size:16px">' + App.esc(rec.id_jamaah) + '</div></div>') : '') +
       '<div class="full sec-title">Identitas</div>' +
       f('nama', 'Nama lengkap *', 'required maxlength="100"', 'full') +
       f('nama_panggilan', 'Nama panggilan') +
@@ -259,6 +263,11 @@
         var phone = v.no_hp.replace(/[\s\-().]/g, '');
         if (phone && !/^(\+62|62|0)?8\d{7,12}$/.test(phone)) throw new Error('Format no HP tidak valid (contoh 081234567890).');
         if (isEdit) v.id_jamaah = rec.id_jamaah;
+        if (v.no_jamaah_baru !== undefined) {
+          v.no_jamaah_baru = v.no_jamaah_baru.toUpperCase().replace(/\s+/g, '');
+          if (!v.no_jamaah_baru) throw new Error('No Jamaah tidak boleh kosong.');
+          if (!/^[A-Z0-9][A-Z0-9-]{3,19}$/.test(v.no_jamaah_baru)) throw new Error('Format No Jamaah tidak valid (mis. MIM-0150).');
+        }
         var kk = v.no_kk ? v.no_kk.replace(/\D/g, '') : '';
         return App.api('saveJamaah', v).then(function (saved) {
           if (kk && kk.length !== 16) App.toast('Tersimpan, tapi No KK ' + kk.length + ' digit (seharusnya 16) — mohon dicek.', 'warn', 5000);
@@ -269,7 +278,8 @@
       }
     }).then(function (saved) {
       if (!saved) return;
-      App.toast((isEdit ? 'Data diperbarui: ' : 'Jamaah ditambahkan: ') + saved.nama + ' (' + saved.id_jamaah + ')', 'ok');
+      var ganti = isEdit && saved.id_jamaah !== rec.id_jamaah;
+      App.toast(ganti ? 'No Jamaah diganti: ' + rec.id_jamaah + ' → ' + saved.id_jamaah + '. Cetak ulang kartunya.' : (isEdit ? 'Data diperbarui: ' : 'Jamaah ditambahkan: ') + saved.nama + ' (' + saved.id_jamaah + ')', ganti ? 'warn' : 'ok', ganti ? 6000 : undefined);
       load();
     });
   }
