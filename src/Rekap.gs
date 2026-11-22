@@ -135,8 +135,9 @@ function rekapSesi(token, idSesi) {
     var pesertaIds = db.pesertaIds(sesi.id_program);
     var isPeserta = {};
     pesertaIds.forEach(function (id) { isPeserta[id] = true; });
-    var ids = pesertaIds.slice();
-    recs.forEach(function (a) { if (!isPeserta[a.id_jamaah]) ids.push(a.id_jamaah); });
+    // Hanya jamaah yang tercatat (Hadir/Izin/Sakit/Alpa) — yang belum tercatat tidak ditampilkan.
+    var ids = [];
+    recs.forEach(function (a) { if (ids.indexOf(a.id_jamaah) === -1) ids.push(a.id_jamaah); });
 
     var ringkas = { peserta: pesertaIds.length, Hadir: 0, Izin: 0, Sakit: 0, Alpa: 0, Belum: 0,
                     Selesai: recs.filter(function (a) { return a.status === 'Hadir' && a.waktu_selesai; }).length };
@@ -214,27 +215,23 @@ function rekapProgram(token, idProgram, dari, sampai) {
 }
 
 /**
- * Per PERTEMUAN (tanggal) satu program — format "Rekap Pertemuan & Kehadiran Harian":
+ * Per PERTEMUAN = per SESI satu program — format "Rekap Pertemuan & Kehadiran Harian":
  * total hadir, anak/remaja vs ibu/dewasa, pakai kartu barcode vs tanpa barcode, jumlah kelompok (kelas) yang hadir,
- * ditambah KPI keaktifan jamaah (aktif ≥ 3×, sedang 1–2×, tidak aktif 0×) pada periode yang sama.
+ * ditambah KPI keaktifan jamaah (aktif ≥ 3×, sedang 1–2×, tidak aktif 0×) dari sesi yang ditampilkan.
+ * idSesi kosong = semua sesi program (yang sedang berlangsung maupun sudah ditutup).
  */
 var METODE_BARCODE = ['Scan Kamera', 'Scanner', 'Google Form'];
-function rekapPertemuan(token, idProgram, dari, sampai) {
+function rekapPertemuan(token, idProgram, idSesi) {
   return respond_(function () {
     requireAuth_(token, 'admin');
-    var range = range_(dari, sampai);
     var db = loadRekapDb_();
     var p = db.program[idProgram];
     if (!p) throw new Error('Program tidak ditemukan.');
     var today = today_();
+    idSesi = clean_(idSesi);
     var sesi = db.sesi.filter(function (s) {
-      return s.id_program === idProgram && s.tanggal >= range.dari && s.tanggal <= range.sampai && s.tanggal <= today;
-    });
-    var tglSesi = {}, sesiPertama = {};
-    sesi.forEach(function (s) {
-      tglSesi[s.id_sesi] = s.tanggal;
-      if (!sesiPertama[s.tanggal] || (s.jam_mulai || '') < (sesiPertama[s.tanggal].jam || '')) sesiPertama[s.tanggal] = { id: s.id_sesi, jam: s.jam_mulai };
-    });
+      return s.id_program === idProgram && (idSesi ? s.id_sesi === idSesi : s.tanggal <= today);
+    }).sort(function (a, b) { return (a.tanggal + (a.jam_mulai || '')).localeCompare(b.tanggal + (b.jam_mulai || '')); });
 
     // Kategori jamaah: dari kelas fasilitatornya; bila belum punya kelas → dari usia (< 21 th = anak/remaja).
     var katFasil = {};
@@ -248,26 +245,21 @@ function rekapPertemuan(token, idProgram, dari, sampai) {
       return u < 21;
     }
 
-    var per = {};       // tanggal → { id_jamaah: absensi }
+    var per = {};       // id_sesi → { id_jamaah: absensi } (hanya HADIR)
+    var dipilih = {}; sesi.forEach(function (s) { dipilih[s.id_sesi] = true; per[s.id_sesi] = {}; });
     db.absensi.forEach(function (a) {
-      var t = tglSesi[a.id_sesi];
-      if (!t || a.status !== 'Hadir') return;
-      per[t] = per[t] || {};
-      if (!per[t][a.id_jamaah]) per[t][a.id_jamaah] = a;
+      if (!dipilih[a.id_sesi] || a.status !== 'Hadir') return;
+      if (!per[a.id_sesi][a.id_jamaah]) per[a.id_sesi][a.id_jamaah] = a;
     });
     var HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    function ditutup(t) { return sesi.some(function (s) { return s.tanggal === t && s.status === 'Ditutup'; }); }
-    // Pertemuan hari ini yang sesinya masih dibuka belum dihitung (angkanya masih bertambah).
-    var berjalan = sesiPertama[today] && !ditutup(today) ? { tanggal: today, hadir: Object.keys(per[today] || {}).length } : null;
-    var rows = Object.keys(sesiPertama).filter(function (t) {
-      return (per[t] || ditutup(t)) && !(berjalan && t === today);
-    }).sort().map(function (t) {
-      var hadir = per[t] || {}, ids = Object.keys(hadir);
-      var r = { tanggal: t, hari: HARI[new Date(t + 'T12:00:00Z').getUTCDay()], id_sesi: sesiPertama[t].id, jam: sesiPertama[t].jam || '',
+    var rows = sesi.map(function (s) {
+      var hadir = per[s.id_sesi], ids = Object.keys(hadir);
+      var r = { id_sesi: s.id_sesi, tanggal: s.tanggal, hari: HARI[new Date(s.tanggal + 'T12:00:00Z').getUTCDay()], jam: s.jam_mulai || '',
+                keterangan: s.keterangan || '', status: s.status, berlangsung: s.status === 'Dibuka',
                 total: ids.length, anak: 0, dewasa: 0, tanpaKategori: 0, barcode: 0, tanpaBarcode: 0, kelompok: 0 };
       var kel = {};
       ids.forEach(function (id) {
-        var j = db.jamaah[id], k = anak(j, t);
+        var j = db.jamaah[id], k = anak(j, s.tanggal);
         if (k === true) r.anak++; else if (k === false) r.dewasa++; else r.tanpaKategori++;
         if (METODE_BARCODE.indexOf(hadir[id].metode) !== -1) r.barcode++; else r.tanpaBarcode++;
         if (j && j.kelompok) kel[j.kelompok] = true;
@@ -277,30 +269,36 @@ function rekapPertemuan(token, idProgram, dari, sampai) {
       return r;
     });
 
-    // KPI keaktifan jamaah pada periode ini
+    // KPI keaktifan: berapa pertemuan (tanggal berbeda) tiap jamaah hadir pada sesi yang ditampilkan
     var hadirTgl = {};
-    rows.forEach(function (r) { Object.keys(per[r.tanggal] || {}).forEach(function (id) { hadirTgl[id] = (hadirTgl[id] || 0) + 1; }); });
+    rows.forEach(function (r) {
+      Object.keys(per[r.id_sesi]).forEach(function (id) { (hadirTgl[id] = hadirTgl[id] || {})[r.tanggal] = true; });
+    });
     var populasi = pesertaProgram_(p, db.jamaahList);
     var inPop = {}; populasi.forEach(function (j) { inPop[j.id_jamaah] = true; });
     Object.keys(hadirTgl).forEach(function (id) { if (!inPop[id] && db.jamaah[id]) { populasi.push(db.jamaah[id]); inPop[id] = true; } });
     var kat = { aktif: [], sedang: [], tidak: [] };
     populasi.forEach(function (j) {
-      var n = hadirTgl[j.id_jamaah] || 0;
+      var n = hadirTgl[j.id_jamaah] ? Object.keys(hadirTgl[j.id_jamaah]).length : 0;
       (n >= BATAS_AKTIF ? kat.aktif : n >= 1 ? kat.sedang : kat.tidak).push([j.id_jamaah, j.nama, j.kelompok || j.desa || '', n]);
     });
     Object.keys(kat).forEach(function (k) { kat[k].sort(function (a, b) { return b[3] - a[3] || a[1].localeCompare(b[1]); }); });
-    var n = rows.length;
-    function avg(key) { var s = 0; rows.forEach(function (r) { s += r[key]; }); return n ? Math.round(s / n * 10) / 10 : 0; }
+    // Rata-rata dari sesi yang sudah ditutup (sesi yang masih berlangsung angkanya masih bertambah).
+    var basis = rows.filter(function (r) { return !r.berlangsung; });
+    if (!basis.length) basis = rows;
+    var n = basis.length;
+    function avg(key) { var s = 0; basis.forEach(function (r) { s += r[key]; }); return n ? Math.round(s / n * 10) / 10 : 0; }
     var totalHadir = 0, totalBarcode = 0;
-    rows.forEach(function (r) { totalHadir += r.total; totalBarcode += r.barcode; });
+    basis.forEach(function (r) { totalHadir += r.total; totalBarcode += r.barcode; });
     var pop = populasi.length;
     function pct(x) { return pop ? Math.round(x / pop * 100) : 0; }
     return {
-      program: { id_program: p.id_program, nama_program: p.nama_program }, range: range, berjalan: berjalan,
+      program: { id_program: p.id_program, nama_program: p.nama_program }, idSesi: idSesi,
       kpi: {
         total: pop, aktif: kat.aktif.length, aktifPct: pct(kat.aktif.length), sedang: kat.sedang.length, sedangPct: pct(kat.sedang.length),
         tidak: kat.tidak.length, tidakPct: pct(kat.tidak.length), batas: BATAS_AKTIF,
-        pertemuan: n, rataHadir: avg('total'), rataAnak: avg('anak'), rataDewasa: avg('dewasa'),
+        pertemuan: rows.length, ditutup: rows.length - rows.filter(function (r) { return r.berlangsung; }).length, berlangsung: rows.filter(function (r) { return r.berlangsung; }).length,
+        rataHadir: avg('total'), rataAnak: avg('anak'), rataDewasa: avg('dewasa'),
         rataBarcode: avg('barcode'), pctBarcode: totalHadir ? Math.round(totalBarcode / totalHadir * 100) : 0,
         rataKelompok: avg('kelompok'), daftar: kat
       },
@@ -524,6 +522,7 @@ function loadRekapDb_() {
   var people = {};
   db.petugasList.forEach(function (p) { people[p.id_petugas] = p.nama; });
   db.adminList.forEach(function (a) { people[a.id_admin] = a.nama + ' (admin)'; });
+  people.IMPOR = 'Impor Google Form';
   db.namaPetugas = function (id) { return people[id] || id || ''; };
   var pcache = {};
   db.pesertaIds = function (pid) {
