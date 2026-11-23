@@ -83,6 +83,15 @@ Tugasnya melengkapi data master jamaah (foto, tanggal lahir, alamat, KK, dll.) d
 ---
 
 ## 📖 Untuk FASILITATOR
+**Prinsip: anti-ribet, serba tap.** Patokannya kualitas bacaan (lulus pos indikator), bukan halaman Iqro.
+- **Absen 1 tap** di kartu jamaah: Hadir / Izin / Sakit / Alpa. Tap **Hadir** → lembar **Nilai Pos** langsung terbuka.
+- **Peta pos** tiap jamaah: hijau ✓ = lulus, kuning ! = perlu penguatan, garis putus = pos yang dinilai hari ini.
+- **Nilai Pos**: tap **Lulus Pos Ini** (otomatis lanjut ke pos berikutnya) atau **Tetap & Kuatkan** → pilih tag titik lemah / ketik 1 baris catatan.
+- Di kartu tampil **Terakhir diajar oleh …**, **catatan estafet** dari fasilitator sebelumnya, dan **rekomendasi halaman** hari ini.
+- Semua pos hijau (Iqro 6 + 5 ceklis EBTA) → **Siap Naik Level — Ajukan**. Bila pos terakhir lulus tapi ada pos kuning di tengah, aplikasi menahan: "masih harus tetap dulu untuk menguatkan Pos X".
+- Qur'an Sedang/Besar: pos tilawah memakai penghitung **Juz** (+/−); Qur'an Besar memilih **jalur** A Tilawah / B Tahfizh / C Ta'lim.
+- **Gantikan regu lain** (tombol di kartu hijau): mengajar kelas yang fasilitatornya berhalangan — semua catatan ditandai *pengganti*. Tekan **Selesai** untuk kembali ke kelas sendiri.
+
 > Akun fasilitator dibuat **per orang** oleh admin di **Kelola User** (nama lengkap, username, password). Admin memasangkan 2 fasilitator dalam satu **kelas** di menu **Fasilitator**.
 
 1. Login dengan username + password dari admin.

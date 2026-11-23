@@ -161,6 +161,11 @@ Jenis petugas ketiga selain admin dan petugas absensi. Admin membuatnya di menu 
 - Menu **Kelola User** (dulu *Petugas*): tambah/edit akun petugas absensi, pendataan, dan akun login fasilitator (`aturAkunFasilitator`, `hapusAkunFasilitator`, `setFasilitatorStatus`), reset password, aktif/nonaktif.
 - Tombol kembali di HP dijaga `App.guardBack()`: pop-up ditutup dulu, lalu konfirmasi *Keluar dari aplikasi?*.
 
+## Kurikulum pos indikator (Kurikulum.gs)
+- `KURIKULUM`: pos per level (Iqro 1–6 + EBTA Iqro 6, Qur'an Kecil/Sedang, Qur'an Besar 3 jalur) beserta deskripsi, rekomendasi halaman, dan tag titik lemah.
+- Sheet **PROGRES POS**: riwayat penilaian (Lulus/Kuatkan, tag, catatan, juz, sesi, fasilitator, pengganti). Level jamaah = laporan terakhir (Lanjut → level berikutnya) atau tingkat kelas.
+- `simpanPos` (otomatis HADIR bila sesi dibuka), `ajukanNaikLevel` (semua pos hijau → laporan Lanjut), `rekapProgresPos` (admin). Mode pengganti: parameter `id_kelas_pengganti` di fungsi fasilitator.
+
 ## Fasilitator & laporan perkembangan jamaah
 - **Fasilitator per orang**: akun di sheet PETUGAS dengan `jenis = fasilitator` (dibuat di Kelola User). **Kelas** (sheet FASILITATOR) menyimpan pasangan di `anggota_1` / `anggota_2`; nama kelas = gabungan nama anggota (otomatis ikut bila nama diganti). Jenis kelamin kelas tidak dipakai lagi.
 - Migrasi otomatis (`migrasiAkunFasilitator_`): akun lama per pasangan → Fasilitator 1 memakai username & password lama, Fasilitator 2 dibuatkan akun baru (password acak, admin tinggal reset).

@@ -32,6 +32,8 @@ var SCHEMA = {
   // kelas: tingkat kelas yang dipegang (Iqro' 1 … Qur'an Besar) = indikator awal jamaah binaan; kategori: Ibu & Bapak / Remaja & Anak.
   // anggota_1/anggota_2: id_petugas akun fasilitator (per orang, dibuat di Kelola User). nama = gabungan nama anggota (A & B).
   FASILITATOR: ['id_fasilitator', 'nama', 'no_hp', 'jenis_kelamin', 'status', 'catatan', 'username', 'pin_hash', 'salt', 'kelas', 'kategori', 'anggota_1', 'anggota_2'],
+  // Penilaian pos indikator kurikulum (riwayat): Lulus / Kuatkan per pos, siapa yang mengajar & apakah pengganti.
+  PROGRES_POS: ['id', 'waktu', 'tanggal', 'id_jamaah', 'level', 'pos', 'status', 'tag', 'catatan', 'juz', 'id_sesi', 'id_petugas', 'nama_fasilitator', 'pengganti', 'id_kelas'],
   // Laporan perkembangan bacaan jamaah oleh fasilitator: indikator Iqro' 1 … Qur'an Besar, keputusan Tetap / Lanjut.
   LAPORAN_FASILITATOR: ['id_laporan', 'tanggal', 'id_fasilitator', 'nama_fasilitator', 'id_jamaah', 'nama_jamaah',
                         'indikator', 'keputusan', 'keterangan', 'waktu', 'id_sesi'],
@@ -42,7 +44,7 @@ var SCHEMA = {
 };
 
 /** Nama sheet di Google Sheets (bila beda dari nama tabel di kode). */
-var SHEET_NAMES = { DATA_JAMAAH: 'DATA MASTER JAMAAH', LAPORAN_FASILITATOR: 'LAPORAN FASILITATOR' };
+var SHEET_NAMES = { DATA_JAMAAH: 'DATA MASTER JAMAAH', LAPORAN_FASILITATOR: 'LAPORAN FASILITATOR', PROGRES_POS: 'PROGRES POS' };
 
 /**
  * Judul kolom yang tampil di sheet (bila beda dari nama field). Sheet DATA MASTER JAMAAH memakai judul

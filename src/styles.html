@@ -1291,4 +1291,89 @@ html[data-theme="dark"] .dd-opt.pilih { color: #6ee7b7; }
 .fx-absen-pilih input:focus-visible + span { outline: 2px solid #059669; outline-offset: 2px; }
 .fx-row.hadir { border-left: 4px solid #10b981; }
 @media (max-width: 640px) { .fx-seg button { font-size: 12px; padding: 8px 4px; } }
+/* =====================================================================
+   POS INDIKATOR (fasilitator) — serba tap
+   ===================================================================== */
+.fx-hero-top .grow { flex: 1; min-width: 0; }
+.fx-hero-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.3);
+  background: rgba(255,255,255,.12); color: #fff; font: 600 12.5px var(--font); cursor: pointer; white-space: nowrap; }
+.fx-hero-btn svg { width: 15px; height: 15px; }
+.fx-peng-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; background: #f59e0b; color: #fff; font-weight: 700; font-size: 12px; }
+.fx-peng-chip svg { width: 13px; height: 13px; }
+.fx-peng-chip.sm { font-size: 10.5px; padding: 1px 7px; vertical-align: 1px; }
+.fx-peng { display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin-bottom: 12px; border-radius: 14px; background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.4); }
+.fx-peng[hidden] { display: none; }
+.fx-peng > svg { width: 20px; height: 20px; color: #d97706; flex: none; }
+.fx-peng .grow { flex: 1; min-width: 0; font-size: 13px; } .fx-peng b { display: block; font-size: 14px; }
+.fx-peng-list { display: grid; gap: 6px; }
+.fx-peng-opt { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  cursor: pointer; text-align: left; font: 600 13.5px var(--font); color: var(--fg); }
+.fx-peng-opt:hover { border-color: #059669; background: rgba(5,150,105,.05); }
+.fx-peng-opt span { flex: 1; min-width: 0; }
+.fx-peng-opt svg { width: 16px; height: 16px; color: var(--muted); }
+.fx-jalur-k { width: 30px; height: 30px; border-radius: 9px; background: #059669; color: #fff; display: grid; place-items: center; flex: none; }
+
+.fx-diajar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: -2px; }
+.fx-diajar svg { width: 14px; height: 14px; }
+.fx-diajar b { color: var(--fg); }
+.fx-absen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; }
+.fx-absen button { border: 0; background: transparent; border-radius: 9px; padding: 9px 2px; font: 700 13px var(--font); color: var(--muted); cursor: pointer; }
+.fx-absen button:hover { background: var(--surface); }
+.fx-absen button.on { color: #fff; box-shadow: var(--shadow-sm); }
+.fx-absen .st-hadir.on { background: #059669; } .fx-absen .st-izin.on { background: #2563eb; }
+.fx-absen .st-sakit.on { background: #d97706; } .fx-absen .st-alpa.on { background: #dc2626; }
+.fx-level { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.fx-posmap { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: thin; }
+.fx-pos { flex: 1 0 74px; max-width: 120px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 12px;
+  border: 1.5px solid var(--line); background: var(--surface); cursor: pointer; font: inherit; color: var(--muted); }
+.fx-pos span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: var(--surface-2); color: var(--muted); }
+.fx-pos small { font-size: 10.5px; line-height: 1.2; text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.fx-pos.ok { border-color: rgba(5,150,105,.5); background: rgba(5,150,105,.07); color: #065f46; }
+.fx-pos.ok span { background: #059669; color: #fff; }
+.fx-pos.warn { border-color: rgba(217,119,6,.55); background: rgba(245,158,11,.09); color: #92400e; }
+.fx-pos.warn span { background: #f59e0b; color: #fff; }
+.fx-pos.aktif { border-color: #059669; border-style: dashed; color: var(--fg); }
+.fx-pos.aktif span { background: #fff; color: #059669; box-shadow: inset 0 0 0 2px #059669; }
+html[data-theme="dark"] .fx-pos.ok { color: #6ee7b7; } html[data-theme="dark"] .fx-pos.warn { color: #fcd34d; }
+.fx-posmap.mini .fx-pos { flex-basis: 60px; padding: 6px 3px; }
+.fx-estafet { display: flex; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3); font-size: 12.5px; }
+.fx-estafet > svg { width: 16px; height: 16px; color: #d97706; flex: none; margin-top: 1px; }
+.fx-estafet > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fx-estafet b { font-size: 12.5px; color: #92400e; } html[data-theme="dark"] .fx-estafet b { color: #fcd34d; }
+.fx-estafet small { color: var(--muted); font-size: 11.5px; }
+.fx-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.fx-tags em { font-style: normal; font-weight: 700; font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: rgba(245,158,11,.2); color: #92400e; }
+.fx-rek { display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border-radius: 12px; background: rgba(5,150,105,.07); font-size: 12.5px; }
+.fx-rek svg { width: 16px; height: 16px; color: #059669; flex: none; margin-top: 1px; }
+.fx-tahan { display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border-radius: 12px; background: rgba(220,38,38,.07); color: #b91c1c; font-size: 12.5px; font-weight: 600; }
+.fx-tahan svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.btn.fx-naik { background: linear-gradient(135deg, #d97706, #f59e0b); color: #fff; border-color: transparent; font-weight: 800; }
+.fx-done { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 700; color: #047857; font-size: 13px; }
+.fx-done svg { width: 18px; height: 18px; }
+.fx-btns .btn:last-child:not(:first-child) { flex: 0 0 46px; }
+
+/* Lembar nilai pos */
+.modal-box.fx-sheet { max-width: 520px; }
+.fx-sheet-head { display: flex; align-items: center; gap: 10px; margin: -4px 0 10px; }
+.fx-sheet-head b { display: block; font-size: 15px; } .fx-sheet-head span { font-size: 12.5px; color: var(--muted); }
+.fx-sheet-d { font-size: 14px; line-height: 1.55; margin: 10px 0; }
+.fx-prev { font-size: 12.5px; padding: 8px 12px; border-radius: 10px; margin-top: 8px; }
+.fx-prev.ok { background: rgba(5,150,105,.08); } .fx-prev.warn { background: rgba(245,158,11,.1); }
+.fx-juz { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+.fx-juz button { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); font: 800 20px var(--font); cursor: pointer; color: var(--fg); }
+.fx-juz b { font-size: 20px; color: var(--fg); min-width: 80px; text-align: center; }
+.fx-pilih2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.fx-pilih2 button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 8px; border-radius: 14px; cursor: pointer; font: inherit; border: 2px solid; }
+.fx-pilih2 button svg { width: 28px; height: 28px; }
+.fx-pilih2 b { font-size: 15px; } .fx-pilih2 small { font-size: 11.5px; opacity: .8; }
+.fx-lulus { background: #059669; border-color: #059669 !important; color: #fff; }
+.fx-lulus:disabled { opacity: .4; cursor: not-allowed; }
+.fx-kuat { background: rgba(245,158,11,.1); border-color: #f59e0b !important; color: #92400e; }
+.fx-kuat.on { background: #f59e0b; color: #fff; }
+.fx-kuat-form { display: grid; gap: 10px; margin-top: 12px; }
+.fx-kuat-form[hidden] { display: none; }
+.fx-tagpick { display: flex; flex-wrap: wrap; gap: 6px; }
+.fx-tagpick button { padding: 8px 12px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); font: 600 13px var(--font); cursor: pointer; color: var(--fg); }
+.fx-tagpick button.on { border-color: #f59e0b; background: rgba(245,158,11,.15); color: #92400e; }
+@media (max-width: 640px) { .fx-hero-btn span { display: none; } }
 </style>

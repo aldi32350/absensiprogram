@@ -22,10 +22,13 @@ function listThumbJamaah(token) {
 }
 
 /** Foto besar satu jamaah (data URL WebP) atau '' bila belum ada. Admin & petugas. */
-function getFotoJamaah(token, idJamaah) {
+function getFotoJamaah(token, idJamaah, idKelasPengganti) {
   return respond_(function () {
     var s = requireAuth_(token, 'any');
-    if (s.role === 'fasilitator' && !binaanSet_(s.id)[clean_(idJamaah).toUpperCase()]) throw new Error('Jamaah ini bukan binaan Anda.');
+    if (s.role === 'fasilitator') {
+      var jj = findBy_('DATA_JAMAAH', 'id_jamaah', clean_(idJamaah).toUpperCase());
+      if (!jj || !fasilSaya_(s, idKelasPengganti).kelasByNama[jj.kelompok]) throw new Error('Jamaah ini bukan binaan Anda.');
+    }
     var f = findBy_('FOTO_JAMAAH', 'id_jamaah', clean_(idJamaah).toUpperCase());
     if (!f || !f.file_id) return f && f.thumb ? f.thumb : '';
     try {
